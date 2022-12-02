@@ -17,15 +17,16 @@ tfd = tfp.distributions
 
 # Parameters
 unity_file_name = ""            # Unity environment name
-num_total_steps = 1000    # Total number of time steps to run the training
-learning_rate = 1e-3            # Learning rate for optimizing the neural networks
-num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
-epsilon = 0.3                   # Epsilon value in the PPO algorithm
-trajectory_size = 1000           # Total number of trajectory samples to be sampled per time step
+num_total_steps = 100000    # Total number of time steps to run the training
+learning_rate_policy = 1e-5            # Learning rate for optimizing the neural networks
+learning_rate_value = 1e-3
+num_epochs = 8                  # Number of epochs per time step to optimize the neural networks
+epsilon = 0.25                   # Epsilon value in the PPO algorithm
+max_trajectory_size = 10000          # max number of trajectory samples to be sampled per time step.
 input_length_net = 4            # input layer size
-policy_output_size = 2          # output layer size
+policy_output_size = 2          # policy output layer size
 discount_factor = 0.99
-env_name = "CartPole-v1"
+env_name = "CartPole-v1"        # LunarLander-v2 or MountainCar-v0 or CartPole-v1
 #output_continous_sampler = tfd.MultivariateNormalDiag(loc=[0., 0., 0., 0.], scale_diag=[1., 1., 1., 1.]) # Continous output
 
 print(f"Tensorflow version: {tf.__version__}")
@@ -60,7 +61,7 @@ class ValueNetwork(tf.keras.Model):
         self.flatten = Flatten()
         self.dense1 = Dense(units=input_length_net, activation='tanh')
         self.dense2 = Dense(units=64, activation='tanh')
-        self.dense3 = Dense(units=1, activation='linear') # 'linear' if the action space is continous
+        self.dense3 = Dense(units=1, activation='tanh')
 
     def call(self, x):
         x = self.dense1(x)
@@ -117,8 +118,8 @@ def clip_func(advantage):
 #
 
 # Setup training properties
-policy_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-value_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+policy_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_policy)
+value_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_value)
 
 env = gym.make(env_name, render_mode="human")
 env.action_space.seed(42)
@@ -138,7 +139,7 @@ print(env.action_space)
 # Training loop
 import datetime
 current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-train_log_dir = 'logs/gradient_tape/' + current_time + '/train'
+train_log_dir = f'logs/gradient_tape/{env_name}' + current_time + '/train'
 train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
 num_passed_timesteps = 0
@@ -152,11 +153,11 @@ while num_passed_timesteps < num_total_steps:
     trajectory_advantages = []
     total_reward = 0
     total_value = 0
-    observation, info = env.reset()
+    observation, info = env.reset(seed=42)
 
     # Collect trajectory
     print("Collecting trajectory...")
-    for batch_k in range(trajectory_size):
+    for batch_k in range(max_trajectory_size):
         current_action_prob = policy_net(observation.reshape(1,input_length_net))
         current_action_dist = tfd.Categorical(probs=current_action_prob)
         current_action = current_action_dist.sample().numpy()[0]
@@ -165,23 +166,24 @@ while num_passed_timesteps < num_total_steps:
 
         # Sample new state
         observation, reward, terminated, truncated, info = env.step(current_action)
+        total_reward = total_reward + reward
 
         # Collect trajectory sample
         trajectory_observations.append(observation)
         trajectory_rewards.append(reward)
-        trajectory_action_probs.append(current_action_prob)
-        trajectory_advantages.append(reward - value_net(observation.reshape((1,input_length_net))))
+        trajectory_action_probs.append(np.max(current_action_prob))
         
         if terminated or truncated:
             observation, info = env.reset(seed=42)
             break
 
     num_episodes = num_episodes + 1
-    
+
+    # Compute advantages
+    trajectory_advantages = np.array(total_reward) - value_net(np.array(trajectory_observations))
+
     # Update loop
     print("Updating the neural networks...")
-    #policy_loss = 0
-    #value_loss = 0
     for epoch in range(num_epochs):
 
         trajectory_observations = np.array(trajectory_observations)
@@ -191,9 +193,9 @@ while num_passed_timesteps < num_total_steps:
 
         with tf.GradientTape() as policy_tape:
             policy_dist             = policy_net(trajectory_observations)
-            policy_action_prob      = policy_dist[:, :]
+            policy_action_prob      = tf.experimental.numpy.max(policy_dist[:, :], axis=1)
             # Policy loss update
-            clip_1                  = (policy_action_prob / trajectory_action_probs) * trajectory_advantages
+            clip_1                  = tf.multiply((tf.divide(policy_action_prob,trajectory_action_probs)),trajectory_advantages)
             clip                    = np.vectorize(clip_func)
             clip_2                  = clip(trajectory_advantages)
             policy_loss             = -tf.reduce_mean(tf.minimum(clip_1, clip_2))
@@ -238,5 +240,5 @@ env.close()
 #
 
 # Save the policy and value networks
-policy_net.save(f"policy_model_{num_passed_timesteps}")
-value_net.save(f"value_model_{num_passed_timesteps}")
+policy_net.save(f"{env_name}_policy_model_{num_passed_timesteps}")
+value_net.save(f"{env_name}_value_model_{num_passed_timesteps}")
