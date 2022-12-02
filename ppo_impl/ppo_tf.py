@@ -17,10 +17,10 @@ tfd = tfp.distributions
 
 # Parameters
 unity_file_name = ""            # Unity environment name
-num_total_steps = 1000000     # Total number of time steps to run the training
+num_total_steps = 1000    # Total number of time steps to run the training
 learning_rate = 1e-3            # Learning rate for optimizing the neural networks
 num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
-epsilon = 0.4                   # Epsilon value in the PPO algorithm
+epsilon = 0.3                   # Epsilon value in the PPO algorithm
 trajectory_size = 1000           # Total number of trajectory samples to be sampled per time step
 input_length_net = 4            # input layer size
 policy_output_size = 2          # output layer size
@@ -136,7 +136,14 @@ print(env.action_space)
 #
 
 # Training loop
+import datetime
+current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+train_log_dir = 'logs/gradient_tape/' + current_time + '/train'
+train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+
 num_passed_timesteps = 0
+sum_rewards = 0
+num_episodes = 0
 while num_passed_timesteps < num_total_steps:
 
     trajectory_observations = []
@@ -145,7 +152,7 @@ while num_passed_timesteps < num_total_steps:
     trajectory_advantages = []
     total_reward = 0
     total_value = 0
-    #observation, info = env.reset()
+    observation, info = env.reset()
 
     # Collect trajectory
     print("Collecting trajectory...")
@@ -169,8 +176,7 @@ while num_passed_timesteps < num_total_steps:
             observation, info = env.reset(seed=42)
             break
 
-    
-    #advantage = total_reward - total_value # TODO: any other advantage estimation method can be used...
+    num_episodes = num_episodes + 1
     
     # Update loop
     print("Updating the neural networks...")
@@ -185,8 +191,6 @@ while num_passed_timesteps < num_total_steps:
 
         with tf.GradientTape() as policy_tape:
             policy_dist             = policy_net(trajectory_observations)
-            #output_discrete_sampler = tfd.Categorical(probs=policy_dist)
-            #policy_action           = output_discrete_sampler.sample()
             policy_action_prob      = policy_dist[:, :]
             # Policy loss update
             clip_1                  = (policy_action_prob / trajectory_action_probs) * trajectory_advantages
@@ -208,9 +212,31 @@ while num_passed_timesteps < num_total_steps:
         print(f"Epoch: {epoch}, Policy loss: {policy_loss}")
         print(f"Epoch: {epoch}, Value loss: {value_loss}")
 
+
     num_passed_timesteps = num_passed_timesteps + len(trajectory_observations)
 
     print(f"Total time steps: {num_passed_timesteps}")
-    print(f"Total rewards: {np.sum(trajectory_rewards)}")
+    sum_rewards = sum_rewards + np.sum(trajectory_rewards)
+    mean_return = sum_rewards / num_episodes
+    print(f"Mean cumulative return per episode: {mean_return}")
+
+    # Log into tensorboard
+    # TODO: @Janina could you integrate wandb here?
+    with train_summary_writer.as_default():
+        tf.summary.scalar('policy loss', policy_loss, step=num_episodes)
+        tf.summary.scalar('value loss', value_loss, step=num_episodes)
+        tf.summary.scalar('mean return', mean_return, step=num_episodes)
          
 env.close()
+
+#
+#
+#
+#
+#
+#
+#
+
+# Save the policy and value networks
+policy_net.save(f"policy_model_{num_passed_timesteps}")
+value_net.save(f"value_model_{num_passed_timesteps}")
