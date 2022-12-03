@@ -17,15 +17,16 @@ tfd = tfp.distributions
 
 # Parameters
 unity_file_name = ""            # Unity environment name
-num_total_steps = 100000    # Total number of time steps to run the training
-learning_rate_policy = 1e-5            # Learning rate for optimizing the neural networks
+num_total_steps = 1e5    # Total number of time steps to run the training
+learning_rate_policy = 1e-3            # Learning rate for optimizing the neural networks
 learning_rate_value = 1e-3
-num_epochs = 8                  # Number of epochs per time step to optimize the neural networks
-epsilon = 0.25                   # Epsilon value in the PPO algorithm
-max_trajectory_size = 10000          # max number of trajectory samples to be sampled per time step.
+num_epochs = 20                  # Number of epochs per time step to optimize the neural networks
+epsilon = 0.2                   # Epsilon value in the PPO algorithm
+max_trajectory_size = 10000          # max number of trajectory samples to be sampled per time step. 
+trajectory_iterations = 32      # number of batches of episodes
 input_length_net = 4            # input layer size
 policy_output_size = 2          # policy output layer size
-discount_factor = 0.99
+discount_factor = 0.98
 env_name = "CartPole-v1"        # LunarLander-v2 or MountainCar-v0 or CartPole-v1
 #output_continous_sampler = tfd.MultivariateNormalDiag(loc=[0., 0., 0., 0.], scale_diag=[1., 1., 1., 1.]) # Continous output
 
@@ -156,26 +157,27 @@ while num_passed_timesteps < num_total_steps:
     observation, info = env.reset(seed=42)
 
     # Collect trajectory
-    print("Collecting trajectory...")
-    for batch_k in range(max_trajectory_size):
-        current_action_prob = policy_net(observation.reshape(1,input_length_net))
-        current_action_dist = tfd.Categorical(probs=current_action_prob)
-        current_action = current_action_dist.sample().numpy()[0]
+    for iter in range(trajectory_iterations):
+        print("Collecting trajectory...")
+        for batch_k in range(max_trajectory_size):
+            current_action_prob = policy_net(observation.reshape(1,input_length_net))
+            current_action_dist = tfd.Categorical(probs=current_action_prob)
+            current_action = current_action_dist.sample().numpy()[0]
 
-        total_value = total_value + value_net(observation.reshape((1,input_length_net)))
+            total_value = total_value + value_net(observation.reshape((1,input_length_net)))
 
-        # Sample new state
-        observation, reward, terminated, truncated, info = env.step(current_action)
-        total_reward = total_reward + reward
+            # Sample new state
+            observation, reward, terminated, truncated, info = env.step(current_action)
+            total_reward = total_reward + reward
 
-        # Collect trajectory sample
-        trajectory_observations.append(observation)
-        trajectory_rewards.append(reward)
-        trajectory_action_probs.append(np.max(current_action_prob))
+            # Collect trajectory sample
+            trajectory_observations.append(observation)
+            trajectory_rewards.append(reward)
+            trajectory_action_probs.append(np.max(current_action_prob))
         
-        if terminated or truncated:
-            observation, info = env.reset(seed=42)
-            break
+            if terminated or truncated:
+                observation, info = env.reset(seed=42)
+                break
 
     num_episodes = num_episodes + 1
 
