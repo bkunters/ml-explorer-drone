@@ -221,7 +221,7 @@ while num_passed_timesteps < num_total_steps:
 
     print(f"Total time steps: {num_passed_timesteps}")
     sum_rewards = sum_rewards + np.sum(trajectory_rewards)
-    mean_return = sum_rewards / num_episodes
+    mean_return = sum_rewards / (num_episodes * trajectory_iterations)
     print(f"Mean cumulative return per episode: {mean_return}")
 
     # Log into tensorboard
