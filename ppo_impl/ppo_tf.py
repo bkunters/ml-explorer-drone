@@ -257,6 +257,7 @@ while num_passed_timesteps < num_total_steps:
     # Log into tensorboard & Wandb
     wandb.log({
         'epoch': epoch, 
+        'step': num_episodes,
         'policy loss': policy_loss, 
         'value loss': value_loss, 
         'mean return': mean_return, 
