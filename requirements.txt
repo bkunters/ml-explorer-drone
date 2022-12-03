@@ -1,0 +1,9 @@
+# PPO Clipped requirements
+gym
+torch
+tensorflow
+tensorflow_probability==0.12.2
+numpy 
+
+# Logging
+wandb
