@@ -17,16 +17,16 @@ tfd = tfp.distributions
 
 # Parameters
 unity_file_name = ""            # Unity environment name
-num_total_steps = 1e5    # Total number of time steps to run the training
-learning_rate_policy = 1e-3            # Learning rate for optimizing the neural networks
+num_total_steps = 1e6    # Total number of time steps to run the training
+learning_rate_policy = 5e-4            # Learning rate for optimizing the neural networks
 learning_rate_value = 1e-3
 num_epochs = 20                  # Number of epochs per time step to optimize the neural networks
 epsilon = 0.2                   # Epsilon value in the PPO algorithm
 max_trajectory_size = 10000          # max number of trajectory samples to be sampled per time step. 
-trajectory_iterations = 32      # number of batches of episodes
+trajectory_iterations = 10      # number of batches of episodes
 input_length_net = 4            # input layer size
 policy_output_size = 2          # policy output layer size
-discount_factor = 0.98
+discount_factor = 0.99
 env_name = "CartPole-v1"        # LunarLander-v2 or MountainCar-v0 or CartPole-v1
 #output_continous_sampler = tfd.MultivariateNormalDiag(loc=[0., 0., 0., 0.], scale_diag=[1., 1., 1., 1.]) # Continous output
 
@@ -45,15 +45,16 @@ class PolicyNetwork(tf.keras.Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.flatten = Flatten()
-        self.dense1 = Dense(units=input_length_net, activation='tanh')
-        self.dense2 = Dense(units=64, activation='tanh')
-        self.dense3 = Dense(units=policy_output_size, activation='softmax') # 'linear' if the action space is continous
+        self.dense1 = Dense(units=input_length_net, activation='relu')
+        self.dense2 = Dense(units=64, activation='relu')
+        self.dense3 = Dense(units=64, activation='relu')
+        self.out = Dense(units=policy_output_size, activation='softmax') # 'linear' if the action space is continous
 
     def call(self, x):
         x = self.dense1(x)
         x = self.dense2(x)
         x = self.dense3(x)
-        return x
+        return self.out(x)
 
 # Define the value network
 class ValueNetwork(tf.keras.Model):
@@ -62,13 +63,14 @@ class ValueNetwork(tf.keras.Model):
         self.flatten = Flatten()
         self.dense1 = Dense(units=input_length_net, activation='tanh')
         self.dense2 = Dense(units=64, activation='tanh')
-        self.dense3 = Dense(units=1, activation='tanh')
+        self.dense3 = Dense(units=64, activation='tanh')
+        self.out = Dense(units=1, activation='tanh')
 
     def call(self, x):
         x = self.dense1(x)
         x = self.dense2(x)
         x = self.dense3(x)
-        return x
+        return self.out(x)
 
 #
 #
@@ -82,9 +84,6 @@ class ValueNetwork(tf.keras.Model):
 policy_net = PolicyNetwork()
 value_net = ValueNetwork()
 
-#input = tf.constant([0,0,0,0,0,0,0,0])
-#print(policy_net(input))
-
 #
 #
 #
@@ -94,7 +93,8 @@ value_net = ValueNetwork()
 #
 
 def clip_func(advantage):
-    return (1+epsilon) * advantage if advantage >= 0 else (1-epsilon) * advantage
+    clip = (1+epsilon) * advantage if advantage >= 0 else (1-epsilon) * advantage
+    return clip
 
 #
 #
@@ -157,12 +157,13 @@ while num_passed_timesteps < num_total_steps:
     observation, info = env.reset(seed=42)
 
     # Collect trajectory
+    sum_rewards = 0
+    print("Collecting batch trajectories...")
     for iter in range(trajectory_iterations):
-        print("Collecting trajectory...")
         for batch_k in range(max_trajectory_size):
             current_action_prob = policy_net(observation.reshape(1,input_length_net))
             current_action_dist = tfd.Categorical(probs=current_action_prob)
-            current_action = current_action_dist.sample().numpy()[0]
+            current_action = current_action_dist.sample(seed=42).numpy()[0]
 
             total_value = total_value + value_net(observation.reshape((1,input_length_net)))
 
@@ -197,10 +198,13 @@ while num_passed_timesteps < num_total_steps:
             policy_dist             = policy_net(trajectory_observations)
             policy_action_prob      = tf.experimental.numpy.max(policy_dist[:, :], axis=1)
             # Policy loss update
-            clip_1                  = tf.multiply((tf.divide(policy_action_prob,trajectory_action_probs)),trajectory_advantages)
-            clip                    = np.vectorize(clip_func)
-            clip_2                  = clip(trajectory_advantages)
-            policy_loss             = -tf.reduce_mean(tf.minimum(clip_1, clip_2))
+            ratios                  = tf.divide(policy_action_prob,tf.constant(trajectory_action_probs))
+            clip_1                  = tf.multiply(ratios,tf.squeeze(trajectory_advantages))
+            #clip                    = np.vectorize(clip_func)
+            clip                    = tf.clip_by_value(ratios, 1.0-epsilon, 1.0+epsilon)
+            clip_2                  = tf.multiply(clip, tf.squeeze(trajectory_advantages))
+            min                     = tf.minimum(clip_1, clip_2)
+            policy_loss             = tf.math.negative(tf.reduce_mean(min))
 
         policy_gradients = policy_tape.gradient(policy_loss, policy_net.trainable_variables)
         policy_optimizer.apply_gradients(zip(policy_gradients, policy_net.trainable_variables))
@@ -221,7 +225,7 @@ while num_passed_timesteps < num_total_steps:
 
     print(f"Total time steps: {num_passed_timesteps}")
     sum_rewards = sum_rewards + np.sum(trajectory_rewards)
-    mean_return = sum_rewards / (num_episodes * trajectory_iterations)
+    mean_return = sum_rewards / (trajectory_iterations)
     print(f"Mean cumulative return per episode: {mean_return}")
 
     # Log into tensorboard
