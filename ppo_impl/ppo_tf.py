@@ -1,11 +1,13 @@
+import datetime
 import tensorflow as tf
 from tensorflow.python.keras.layers import Dense, Flatten
 import tensorflow_probability as tfp
 import numpy as np
-from mlagents_envs.environment import UnityEnvironment
+# from mlagents_envs.environment import UnityEnvironment
 import gym
-tfd = tfp.distributions
+import wandb
 
+tfd = tfp.distributions
 #
 #
 #
@@ -122,7 +124,8 @@ value_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_value)
 
 env = gym.make(env_name)
 env.action_space.seed(42)
-observation, info = env.reset()
+env.observation_space.seed(42)
+observation, info = env.reset(seed=42)
 print(f"Observation space shape: {env.observation_space.shape}")
 print(f"Action space shape: {env.action_space.shape}")
 print(env.action_space)
@@ -136,10 +139,29 @@ print(env.action_space)
 #
 
 # Training loop
-import datetime
 current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+# logging
 train_log_dir = f'logs/gradient_tape/{env_name}' + current_time + '/train'
 train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+wandb.init(
+    project=f'drone-mechanics-ppo',
+    entity='drone-mechanics',
+    sync_tensorboard=True,
+    config={ # stores hyperparams in job
+            'total epochs': num_epochs,
+            'total steps': num_total_steps,
+            'batches per episode': trajectory_iterations,
+            'input layer size': input_length_net,
+            'output layer size': policy_output_size,
+            'lr policyNet': learning_rate_policy,
+            'lr valueNet': learning_rate_value,
+            'epsilon': epsilon,
+            'discount': discount_factor
+    },
+    name=f"{env_name}__{current_time}",
+    # monitor_gym=True,
+    save_code=True,
+)
 
 num_passed_timesteps = 0
 sum_rewards = 0
@@ -214,7 +236,7 @@ while num_passed_timesteps < num_total_steps:
             
         value_gradients = value_tape.gradient(value_loss, value_net.trainable_variables)
         value_optimizer.apply_gradients(zip(value_gradients, value_net.trainable_variables))
-            
+        
         print(f"Epoch: {epoch}, Policy loss: {policy_loss}")
         print(f"Epoch: {epoch}, Value loss: {value_loss}")
 
@@ -232,15 +254,21 @@ while num_passed_timesteps < num_total_steps:
         value_net.save(f"{env_name}_value_model")
         last_mean_reward = mean_return
 
-    # Log into tensorboard
-    # TODO: @Janina could you integrate wandb here?
+    # Log into tensorboard & Wandb
+    wandb.log({
+        'epoch': epoch, 
+        'policy loss': policy_loss, 
+        'value loss': value_loss, 
+        'mean return': mean_return, 
+        'sum rewards': sum_rewards})
+
     with train_summary_writer.as_default():
         tf.summary.scalar('policy loss', policy_loss, step=num_episodes)
         tf.summary.scalar('value loss', value_loss, step=num_episodes)
         tf.summary.scalar('mean return', mean_return, step=num_episodes)
-         
+   
 env.close()
-
+wandb.run.finish() if wandb and wandb.run else None
 #
 #
 #
