@@ -2,7 +2,6 @@ import tensorflow as tf
 from tensorflow.python.keras.layers import Dense, Flatten
 import tensorflow_probability as tfp
 import numpy as np
-import pandas as pd
 from mlagents_envs.environment import UnityEnvironment
 import gym
 tfd = tfp.distributions
@@ -17,18 +16,17 @@ tfd = tfp.distributions
 
 # Parameters
 unity_file_name = ""            # Unity environment name
-num_total_steps = 1e6    # Total number of time steps to run the training
-learning_rate_policy = 5e-4            # Learning rate for optimizing the neural networks
+num_total_steps = 25e3           # Total number of time steps to run the training
+learning_rate_policy = 1e-3     # Learning rate for optimizing the neural networks
 learning_rate_value = 1e-3
-num_epochs = 20                  # Number of epochs per time step to optimize the neural networks
+num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
 epsilon = 0.2                   # Epsilon value in the PPO algorithm
-max_trajectory_size = 10000          # max number of trajectory samples to be sampled per time step. 
-trajectory_iterations = 10      # number of batches of episodes
+max_trajectory_size = 10000     # max number of trajectory samples to be sampled per time step. 
+trajectory_iterations = 16      # number of batches of episodes
 input_length_net = 4            # input layer size
 policy_output_size = 2          # policy output layer size
 discount_factor = 0.99
 env_name = "CartPole-v1"        # LunarLander-v2 or MountainCar-v0 or CartPole-v1
-#output_continous_sampler = tfd.MultivariateNormalDiag(loc=[0., 0., 0., 0.], scale_diag=[1., 1., 1., 1.]) # Continous output
 
 print(f"Tensorflow version: {tf.__version__}")
 
@@ -45,9 +43,9 @@ class PolicyNetwork(tf.keras.Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.flatten = Flatten()
-        self.dense1 = Dense(units=input_length_net, activation='relu')
-        self.dense2 = Dense(units=64, activation='relu')
-        self.dense3 = Dense(units=64, activation='relu')
+        self.dense1 = Dense(units=input_length_net, activation='tanh')
+        self.dense2 = Dense(units=64, activation='tanh')
+        self.dense3 = Dense(units=64, activation='tanh')
         self.out = Dense(units=policy_output_size, activation='softmax') # 'linear' if the action space is continous
 
     def call(self, x):
@@ -122,9 +120,9 @@ def clip_func(advantage):
 policy_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_policy)
 value_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_value)
 
-env = gym.make(env_name, render_mode="human")
+env = gym.make(env_name)
 env.action_space.seed(42)
-observation, info = env.reset(seed=42)
+observation, info = env.reset()
 print(f"Observation space shape: {env.observation_space.shape}")
 print(f"Action space shape: {env.action_space.shape}")
 print(env.action_space)
@@ -146,6 +144,7 @@ train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 num_passed_timesteps = 0
 sum_rewards = 0
 num_episodes = 0
+last_mean_reward = 0
 while num_passed_timesteps < num_total_steps:
 
     trajectory_observations = []
@@ -177,7 +176,7 @@ while num_passed_timesteps < num_total_steps:
             trajectory_action_probs.append(np.max(current_action_prob))
         
             if terminated or truncated:
-                observation, info = env.reset(seed=42)
+                observation, info = env.reset()
                 break
 
     num_episodes = num_episodes + 1
@@ -200,7 +199,6 @@ while num_passed_timesteps < num_total_steps:
             # Policy loss update
             ratios                  = tf.divide(policy_action_prob,tf.constant(trajectory_action_probs))
             clip_1                  = tf.multiply(ratios,tf.squeeze(trajectory_advantages))
-            #clip                    = np.vectorize(clip_func)
             clip                    = tf.clip_by_value(ratios, 1.0-epsilon, 1.0+epsilon)
             clip_2                  = tf.multiply(clip, tf.squeeze(trajectory_advantages))
             min                     = tf.minimum(clip_1, clip_2)
@@ -220,13 +218,19 @@ while num_passed_timesteps < num_total_steps:
         print(f"Epoch: {epoch}, Policy loss: {policy_loss}")
         print(f"Epoch: {epoch}, Value loss: {value_loss}")
 
-
     num_passed_timesteps = num_passed_timesteps + len(trajectory_observations)
 
     print(f"Total time steps: {num_passed_timesteps}")
     sum_rewards = sum_rewards + np.sum(trajectory_rewards)
     mean_return = sum_rewards / (trajectory_iterations)
     print(f"Mean cumulative return per episode: {mean_return}")
+
+    # Make sure the best model is saved.
+    if mean_return > last_mean_reward:
+        # Save the policy and value networks for further training/tests
+        policy_net.save(f"{env_name}_policy_model")
+        value_net.save(f"{env_name}_value_model")
+        last_mean_reward = mean_return
 
     # Log into tensorboard
     # TODO: @Janina could you integrate wandb here?
@@ -245,6 +249,6 @@ env.close()
 #
 #
 
-# Save the policy and value networks
+# Save the policy and value networks for further training/tests
 policy_net.save(f"{env_name}_policy_model_{num_passed_timesteps}")
 value_net.save(f"{env_name}_value_model_{num_passed_timesteps}")
