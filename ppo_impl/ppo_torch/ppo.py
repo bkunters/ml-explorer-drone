@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 import numpy as np
 
 ####################
@@ -7,16 +8,26 @@ import numpy as np
 
 class Net(nn.Module):
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, in_dim, out_dim) -> None:
+        super(Net, self).__init__()
+        self.layer1 = nn.Linear(in_dim, 64)
+        self.layer2 = nn.Linear(64, 64)
+        self.layer3 = nn.Linear(64, out_dim)
 
 class ValueNet(Net):
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, in_dim, out_dim) -> None:
+        super(ValueNet, self).__init__()
+        self.layer1 = nn.Linear(in_dim, 64)
+        self.layer2 = nn.Linear(64, 64)
+        self.layer3 = nn.Linear(64, out_dim)
     
     def forward(self, obs):
-        pass
+        if isinstance(obs, np.ndarray):
+            obs = torch.tensor(obs, dtype=torch.float)
+        x = F.relu(self.layer1(obs))
+        x = F.relu(self.layer2(x))
+        return self.layer3(x)
     
     def loss(self, states, returns):
         pass
@@ -27,7 +38,8 @@ class PolicyNet(Net):
         super().__init__()
 
     def forward(self, obs, act=None):
-        pass
+        if isinstance(obs, np.ndarray):
+            obs = torch.tensor(obs, dtype=torch.float)
     
     def loss(self, states, actions, advantages):
         pass
@@ -56,8 +68,10 @@ class PPOAgent:
     def finish_episode(self):
         pass
 
-    def collect_rollout(self):
-        pass
+    def collect_rollout(self, state, n_step=1):
+        rollout, done = [], False
+        for _ in range(n_step): 
+            pass
 
     def train(self):
         pass
