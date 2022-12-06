@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.optim import Adam
 import numpy as np
 
 import gym
@@ -69,19 +70,25 @@ class PPOAgent:
         out_dim, 
         seed=42, 
         gamma=0.99, 
-        lr=0.001) -> None:
+        lr=1e-3) -> None:
 
         # TODO: Fix hyperparameter
         self.env = env
         self.gamma = gamma
+        self.lr = lr
         # seed torch, numpy and gym
         self.env.action_space.seed(seed)
         self.env.observation_space.seed(seed)
         torch.manual_seed(seed)
         np.random.seed(seed)
 
+        # add net for actor and critic
         self.policyNet = PolicyNet(in_dim, out_dim)
         self.valueNet = ValueNet(in_dim, 1)
+
+        # add optimizer
+        self.policyNet_optim = Adam(self.policyNet.parameters(), lr=self.lr)
+        self.valueNet_optim = Adam(self.valueNet.parameters(), lr=self.lr)
 
     def step(self):
         pass
