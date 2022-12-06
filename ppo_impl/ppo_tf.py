@@ -92,18 +92,6 @@ value_net = ValueNetwork()
 #
 #
 
-def clip_func(advantage):
-    clip = (1+epsilon) * advantage if advantage >= 0 else (1-epsilon) * advantage
-    return clip
-
-#
-#
-#
-#
-#
-#
-#
-
 # This is a non-blocking call that only loads the environment.
 #env = UnityEnvironment(file_name=unity_file_name, seed=42, side_channels=[])
 # Start interacting with the environment.a
