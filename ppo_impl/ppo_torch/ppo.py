@@ -63,7 +63,7 @@ class PolicyNet(Net):
 ####################
 
 
-class Clip_PPO_PolicyGradient:
+class PPO_PolicyGradient:
 
     def __init__(self, 
         env,
@@ -71,13 +71,12 @@ class Clip_PPO_PolicyGradient:
         out_dim,
         total_timesteps, # total_timesteps (number of actions taken in the environments)
         timesteps_per_batch=2048, # timesteps per batch
-        max_timesteps_per_episode=1000,
+        max_timesteps_per_episode=1600,
         minibatches=4,
         cliprange=0.2,
-        seed=42, 
         gamma=0.99, 
         lr=1e-3,
-        n_envs=1) -> None:
+        seed=42) -> None:
 
         # TODO: Fix hyperparameter
         self.env = env
@@ -106,6 +105,26 @@ class Clip_PPO_PolicyGradient:
         self.policyNet_optim = Adam(self.policyNet.parameters(), lr=self.lr) # Setup Policy Network (Actor) optimizer
         self.valueNet_optim = Adam(self.valueNet.parameters(), lr=self.lr)  # Setup Value Network (Critic) optimizer
 
+    def get_discrete_action_dist(self, obs):
+        pass 
+
+    def get_continuous_action_dist(self, obs):
+        """Make function to compute action distribution in continuous action space."""
+        # 1) Use Normal distribution for continuous space
+        action_prob = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
+        cov_matrix = torch.diag(torch.full(size=(self.out_dim,), fill_value=0.5))
+        return multivariate_normal.MultivariateNormal(action_prob, covariance_matrix=cov_matrix)
+
+    def get_action(self, dist):
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
+        return action, log_prob
+        
+    def get_value(self, obs):
+        value = self.valueNet.forward(obs)
+        return value
+
+
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
         # Multivariate Normal Distribution Lecture 15.7 (Andrew Ng) https://www.youtube.com/watch?v=JjB58InuTqM
@@ -113,12 +132,12 @@ class Clip_PPO_PolicyGradient:
         # https://discuss.pytorch.org/t/understanding-log-prob-for-normal-distribution-in-pytorch/73809
         # 1) Use Normal distribution for continuous space
         # 2) Use Categorial distribution for discrete space
-        
-        means = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
+
+        action_prob = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
         cov_matrix = torch.diag(torch.full(size=(self.out_dim,), fill_value=0.5))
-        dist = multivariate_normal.MultivariateNormal(covariance_matrix=cov_matrix)
-        log_prob = dist.log_prob(means)
-        action = dist.sample()
+        action_dist = multivariate_normal.MultivariateNormal(action_prob, covariance_matrix=cov_matrix)
+        log_prob = action_dist.log_prob(action_prob)
+        action = action_dist.sample()
 
         # detach and convert to numpy array
         action, log_prob = action.detach().numpy(), log_prob.detach().numpy()
@@ -130,11 +149,15 @@ class Clip_PPO_PolicyGradient:
         """Calculate rewards to go to reduce the variance in the policy gradient"""
         # Lecture 5, p. 17: UCB http://rail.eecs.berkeley.edu/deeprlcourse/static/slides/lec-5.pdf
         # Open AI Documentation: https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#implementing-reward-to-go-policy-gradient
-        n = len(rewards)
-        rtgs = np.zeros_like(rewards)
-        for i in reversed(range(n)):
-            rtgs[i] = rewards[i] + (rtgs[i+1] if i+1 < n else 0)
-        return rtgs
+        amount = len(rewards)
+        reward_to_go = np.zeros_like(rewards)
+        for i in reversed(range(amount)):
+            # TODO: Check if there is a discount factor? 
+            reward_to_go[i] = rewards[i] + (reward_to_go[i+1] if i+1 < amount else 0)
+        return reward_to_go
+
+    def advantage(self, rewards):
+        pass
 
     def policy(self):
         pass
@@ -145,23 +168,25 @@ class Clip_PPO_PolicyGradient:
     def collect_rollout(self):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
         
+        logging.info(f'Rollout collecting sample data ...')
+        
         episode_lengths_per_batch = [] # lengths of each episode this batch 
         observations_per_batch = [] # observations for this batch - shape (n_timesteps, dim observations)
         actions_per_batch = [] # actions for this batch - shape (n_timesteps, dim actions)
         log_probs_per_batch = [] # log probabilities per action this batch - shape (n_timesteps)
         rewards_per_batch = [] # rewards collected this batch - shape (n_timesteps)
-        rewards_per_episode = [] # track rewards per episode
 
         timesteps_simulated = 0 # number of timesteps simulated
         while timesteps_simulated < self.timesteps_per_batch:
 
+            # track rewards per episode
             rewards_per_episode = []
             # reset environment for new episode
             next_obs, _ = self.env.reset() 
             done = False 
 
             for episode in range(self.max_timesteps_per_episode):
-                
+                # Run an episode 
                 timesteps_simulated += 1
                 observations_per_batch.appen(next_obs)
                 action, log_probability = self.step(next_obs)
@@ -176,7 +201,7 @@ class Clip_PPO_PolicyGradient:
                 if done or truncated:
                     break
             
-            rewards_per_batch(reward)
+            rewards_per_batch(rewards_per_episode)
             episode_lengths_per_batch(episode + 1) # how long was the episode + 1 as we start at 0
             rewards_to_go_per_batch = self.rewards_to_go(rewards_per_batch, dtype=torch.float)
 
@@ -192,17 +217,14 @@ class Clip_PPO_PolicyGradient:
 
         # logging info 
         logging.info(f'Updating the network...')
-        logging.info(f'Running {self.n_steps} timesteps per batch for a total of {self.nupdates} timesteps')
+        # logging.info(f'Running {self.n_steps} timesteps per batch for a total of {self.nupdates} timesteps')
 
         timesteps_simulated = 0 # number of timesteps simulated
         iterations = 0 # number of iterations
 
         while timesteps_simulated < self.total_timesteps:
             # simulate and collect trajectories
-            batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens = self.collect_rollout()
-
-    def train(self):
-        pass
+            observations, actions, log_probs, rewards2go, episode_length_per_batch = self.collect_rollout()
 
 
 ####################
@@ -248,4 +270,4 @@ if __name__ == '__main__':
     logging.info(f'upper bound for env observation: {env.observation_space.high}')
     logging.info(f'lower bound for env observation: {env.observation_space.low}')
 
-    agent = Clip_PPO_PolicyGradient(env, in_dim=obs_dim, out_dim=act_dim, total_timesteps=num_total_steps, lr=learning_rate)
+    agent = PPO_PolicyGradient(env, in_dim=obs_dim, out_dim=act_dim, total_timesteps=num_total_steps, lr=learning_rate)
