@@ -181,6 +181,8 @@ while num_passed_timesteps < num_total_steps:
     sum_rewards = 0
     print("Collecting batch trajectories...")
     for iter in range(trajectory_iterations):
+
+        # collect samples until agent craches
         for batch_k in range(max_trajectory_size):
             current_action_prob = policy_net(observation.reshape(1,input_length_net))
             current_action_dist = tfd.Categorical(probs=current_action_prob)
@@ -188,7 +190,7 @@ while num_passed_timesteps < num_total_steps:
 
             total_value = total_value + value_net(observation.reshape((1,input_length_net)))
 
-            # Sample new state
+            # Sample new state etc. from environment
             observation, reward, terminated, truncated, info = env.step(current_action)
             total_reward = total_reward + reward
 
@@ -206,7 +208,7 @@ while num_passed_timesteps < num_total_steps:
     # Compute advantages
     trajectory_advantages = np.array(total_reward) - value_net(np.array(trajectory_observations))
 
-    # Update loop
+    # Update the network loop
     print("Updating the neural networks...")
     for epoch in range(num_epochs):
 
@@ -215,6 +217,7 @@ while num_passed_timesteps < num_total_steps:
         trajectory_rewards      = np.array(trajectory_rewards)
         trajectory_advantages   = np.array(trajectory_advantages)
 
+        # Compute policy loss
         with tf.GradientTape() as policy_tape:
             policy_dist             = policy_net(trajectory_observations)
             policy_action_prob      = tf.experimental.numpy.max(policy_dist[:, :], axis=1)
@@ -223,8 +226,8 @@ while num_passed_timesteps < num_total_steps:
             clip_1                  = tf.multiply(ratios,tf.squeeze(trajectory_advantages))
             clip                    = tf.clip_by_value(ratios, 1.0-epsilon, 1.0+epsilon)
             clip_2                  = tf.multiply(clip, tf.squeeze(trajectory_advantages))
-            min                     = tf.minimum(clip_1, clip_2)
-            policy_loss             = tf.math.negative(tf.reduce_mean(min))
+            min_val                 = tf.minimum(clip_1, clip_2)
+            policy_loss             = tf.math.negative(tf.reduce_mean(min_val))
 
         policy_gradients = policy_tape.gradient(policy_loss, policy_net.trainable_variables)
         policy_optimizer.apply_gradients(zip(policy_gradients, policy_net.trainable_variables))
@@ -256,11 +259,11 @@ while num_passed_timesteps < num_total_steps:
 
     # Log into tensorboard & Wandb
     wandb.log({
-        'epoch': epoch, 
         'step': num_episodes,
+        'timesteps': num_passed_timesteps, # die Summe der Episoden über die Gesamte Episoden Anzahl
         'policy loss': policy_loss, 
         'value loss': value_loss, 
-        'mean return': mean_return, 
+        'mean reward': mean_return, 
         'sum rewards': sum_rewards})
 
     with train_summary_writer.as_default():
