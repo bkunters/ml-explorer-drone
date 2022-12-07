@@ -36,4 +36,4 @@ sysinfo.txt
 
 # Monitoring
 wandb/*
-
+ppo_impl/ppo_torch/wandb/*
