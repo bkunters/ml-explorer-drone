@@ -1,0 +1,10 @@
+INFO:root:Updating the network...
+INFO:root:Rollout collecting sample data ...
+Traceback (most recent call last):
+  File "/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/ppo_impl/ppo_torch/ppo.py", line 336, in <module>
+    agent.learn()
+  File "/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/ppo_impl/ppo_torch/ppo.py", line 250, in learn
+    observations, actions, log_probs, rewards2go, episode_length_per_batch = self.collect_rollout()
+  File "/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/ppo_impl/ppo_torch/ppo.py", line 207, in collect_rollout
+    observations_per_batch.appen(next_obs)
+AttributeError: 'list' object has no attribute 'appen'

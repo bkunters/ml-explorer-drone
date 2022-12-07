@@ -1,0 +1,10 @@
+INFO:root:Updating the network...
+INFO:root:Rollout collecting sample data ...
+Traceback (most recent call last):
+  File "/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/ppo_impl/ppo_torch/ppo.py", line 336, in <module>
+    agent.learn()
+  File "/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/ppo_impl/ppo_torch/ppo.py", line 250, in learn
+    observations, actions, log_probs, rewards2go, episode_length_per_batch = self.collect_rollout()
+  File "/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/ppo_impl/ppo_torch/ppo.py", line 201, in collect_rollout
+    next_obs, _ = self.env.reset()
+ValueError: too many values to unpack (expected 2)

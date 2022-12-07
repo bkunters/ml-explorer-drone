@@ -1,0 +1,8 @@
+
+INFO:root:Updating the network...
+Traceback (most recent call last):
+  File "/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/ppo_impl/ppo_torch/ppo.py", line 331, in <module>
+    agent.learn()
+  File "/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/ppo_impl/ppo_torch/ppo.py", line 245, in learn
+    while timesteps_simulated < self.total_timesteps:
+AttributeError: 'PPO_PolicyGradient' object has no attribute 'total_timesteps'
