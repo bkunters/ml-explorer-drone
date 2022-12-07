@@ -217,9 +217,9 @@ class PPO_PolicyGradient:
                 if done or truncated:
                     break
             
-            rewards_per_batch.append(rewards_per_episode)
-            episode_lengths_per_batch.append(episode + 1) # how long was the episode + 1 as we start at 0
-            rewards_to_go_per_batch = self.rewards_to_go(rewards_per_batch)
+            rewards_per_batch(rewards_per_episode)
+            episode_lengths_per_batch(episode + 1) # how long was the episode + 1 as we start at 0
+            rewards_to_go_per_batch = self.rewards_to_go(rewards_per_batch, dtype=torch.float)
 
         return torch.tensor(observations_per_batch, dtype=torch.float), \
                 torch.tensor(actions_per_batch, dtype=torch.float), \

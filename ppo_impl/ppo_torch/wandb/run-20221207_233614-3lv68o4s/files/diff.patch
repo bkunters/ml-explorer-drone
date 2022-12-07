@@ -1,0 +1,231 @@
+diff --git a/ppo_impl/ppo_torch/ppo.py b/ppo_impl/ppo_torch/ppo.py
+index abf867e..a81c13a 100644
+--- a/ppo_impl/ppo_torch/ppo.py
++++ b/ppo_impl/ppo_torch/ppo.py
+@@ -5,7 +5,7 @@ from torch.optim import Adam
+ from  torch.distributions import multivariate_normal
+ from torch.distributions import Categorical
+ import numpy as np
+-
++import datetime
+ import gym
+ 
+ # logging python
+@@ -15,6 +15,21 @@ import sys
+ # monitoring/logging ML
+ import wandb
+ 
++
++####################
++####### TODO #######
++####################
++
++# This is a TODO Section - please mark a todo as (done) if done
++# 0) Check current implementation against article: https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/
++# 1) Adjust code for discrete domain --> CartPole
++# 2) Check code for continuous domain --> Pendulum
++# 3) Implement Surrogate clipping loss
++# 4) Fix calculation of Advantage
++# 5) Check hyperparameters --> check overall implementation logic
++# 6) Add checkpoints to restart model if it got interrupted
++# 7) Check monitoring on W&B --> eventually we need to change the values logged
++
+ ####################
+ ####################
+ 
+@@ -59,10 +74,11 @@ class PolicyNet(Net):
+         out = self.layer3(x)
+         return out
+     
+-    def loss(self, obs, actions, advantages):
++    def loss(self, obs, actions, advantages, log_probs):
+         # TODO: Implement clipped objective function
+         # 1. Calculate V_phi and pi_theta(a_t | s_t)
+         # 2. Calculate ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
++        # 3. ... 
+         pass
+ 
+ 
+@@ -76,26 +92,26 @@ class PPO_PolicyGradient:
+         env,
+         in_dim, 
+         out_dim,
+-        total_timesteps, # total_timesteps (number of actions taken in the environments)
+-        timesteps_per_batch=2048, # timesteps per batch
+-        max_timesteps_per_episode=1600,
+-        minibatches=4,
+-        cliprange=0.2,
++        total_timesteps=10000,
++        timesteps_per_batch=2048, # timesteps per batch (number of actions taken in the environments)
++        max_timesteps_per_episode=1600, # (number of actions taken in the environments)
++        n_updates_per_iteration=5,
++        clip=0.2,
+         gamma=0.99, 
+         lr=1e-3,
+         seed=42) -> None:
+ 
+-        # TODO: Fix hyperparameter
++        # TODO: Check these values --> maybe simplify
+         self.env = env
+         self.gamma = gamma
+         self.lr = lr
+-
+-        # TODO: Check these values
++        self.clip = clip
+         self.in_dim = in_dim
+         self.out_dim = out_dim
+         self.total_timesteps = total_timesteps
+         self.timesteps_per_batch = timesteps_per_batch
+         self.max_timesteps_per_episode = max_timesteps_per_episode
++        self.n_update_per_iteration = n_updates_per_iteration
+ 
+         # seed torch, numpy and gym
+         self.env.action_space.seed(seed)
+@@ -159,11 +175,11 @@ class PPO_PolicyGradient:
+         for i in reversed(range(amount)):
+             # TODO: Check this function is a discount factor? 
+             reward_to_go[i] = rewards[i] + (reward_to_go[i+1] if i+1 < amount else 0)
+-        return reward_to_go
++        return torch.tensor(reward_to_go, dtype=torch.float)
+ 
+     def advantage(self, rewards, values):
+         """Simplest advantage calculation"""
+-        return rewards - values # TODO: Eventually normalize advantage (?) if training is very instable
++        return rewards - values # TODO: Correct? Eventually normalize advantage (?) if training is very instable
+ 
+     def collect_rollout(self):
+         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
+@@ -182,20 +198,20 @@ class PPO_PolicyGradient:
+             # track rewards per episode
+             rewards_per_episode = []
+             # reset environment for new episode
+-            next_obs, _ = self.env.reset() 
++            next_obs = self.env.reset() 
+             done = False 
+ 
+             for episode in range(self.max_timesteps_per_episode):
+                 # Run an episode 
+                 timesteps_simulated += 1
+-                observations_per_batch.appen(next_obs)
++                observations_per_batch.append(next_obs)
+                 action, log_probability = self.step(next_obs)
+                 next_obs, reward, done, truncated = self.env.step(action)
+ 
+                 # tracking of values
+                 actions_per_batch.append(action)
+                 log_probs_per_batch.append(log_probability)
+-                rewards_per_episode(reward)
++                rewards_per_episode.append(reward)
+                 
+                 # break out of loop if episode is terminated
+                 if done or truncated:
+@@ -211,33 +227,41 @@ class PPO_PolicyGradient:
+                 torch.tensor(rewards_to_go_per_batch), \
+                 episode_lengths_per_batch
+ 
+-    def train(self, obs, actions, rewards, advantages):
++    def train(self, obs, actions, rewards, log_probs, advantages):
+         """Calculate loss and update weights of both networks."""
+         self.policyNet_optim.zero_grad() # reset optimizer
+-        policy_loss = self.policyNet.loss(obs, actions, advantages)
++        policy_loss = self.policyNet.loss(obs, actions, advantages, log_probs)
+         policy_loss.backward()
+ 
+         self.valueNet_optim.zero_grad()
+         value_loss = self.valueNet.loss(obs, rewards)
+         value_loss.backward()
+-        
++
++        # monitoring W&B
++        wandb.log({'policy loss': policy_loss, 'value loss': value_loss})
++
+     def learn(self):
+         """"""
+         # logging info 
+         logging.info(f'Updating the network...')
+         timesteps_simulated = 0 # number of timesteps simulated
+-        iterations = 0 # number of iterations
+-
+         while timesteps_simulated < self.total_timesteps:
+-            # simulate and collect trajectories
++            # simulate and collect trajectories --> the following values are all per batch
+             observations, actions, log_probs, rewards2go, episode_length_per_batch = self.collect_rollout()
+             # calculate the advantage of current iteration
+             values = self.valueNet.forward(observations).detach()
+-            advantage = self.advantage(rewards2go, values.squeeze())
++            advantages = self.advantage(rewards2go, values.squeeze())
+ 
+             for _ in range(self.n_updates_per_iteration):
+-                pass
+-    
++                # calculate loss and update weights
++                self.train(observations, actions, rewards2go, advantages)
++            
++            # monitoring W&B
++            wandb.log({
++                'episode length': episode_length_per_batch,
++                'mean reward': np.mean(rewards2go.detach().numpy()), 
++                'sum rewards': np.sum(rewards2go.detach().numpy())
++                })
+ 
+ ####################
+ ####################
+@@ -261,15 +285,18 @@ if __name__ == '__main__':
+     
+     # Hyperparameter
+     unity_file_name = ''
+-    num_total_steps = 25e3
++    total_timesteps = 1000
++    timesteps_per_batch = 4800
++    max_timesteps_per_episode = 1600
++    n_updates_per_iteration = 5
+     learning_rate = 1e-3
+-    epsilon = 0.2
+-    max_trajectory_size = 10000
+-    env_name = 'Pendulum-v1'
++    gamma = 0.99 
++    clip = 0.2
++    env_name = 'Pendulum-v1' #'CartPole-v1'
+ 
+-    # configure logger
++    # Configure logger
+     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+-
++    
+     env = make_env(env_name)
+     # get dimensions of observations (what goes in?)
+     # and actions (what goes out?)
+@@ -281,5 +308,30 @@ if __name__ == '__main__':
+     # upper and lower bound describing the values our observations can take
+     logging.info(f'upper bound for env observation: {env.observation_space.high}')
+     logging.info(f'lower bound for env observation: {env.observation_space.low}')
+-
+-    agent = PPO_PolicyGradient(env, in_dim=obs_dim, out_dim=act_dim, total_timesteps=num_total_steps, lr=learning_rate)
++    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
++    # Monitoring with W&B
++    wandb.init(
++    project=f'drone-mechanics-ppo',
++    entity='drone-mechanics',
++    sync_tensorboard=True,
++    config={ # stores hyperparams in job
++            'timesteps per batch': timesteps_per_batch,
++            'updates per iteration': n_updates_per_iteration,
++            'input layer size': obs_dim,
++            'output layer size': act_dim,
++            'learning rate': learning_rate,
++            'gamma': gamma
++    },
++    name=f"{env_name}__{current_time}",
++    # monitor_gym=True,
++    save_code=True,
++    )
++
++    agent = PPO_PolicyGradient(env, in_dim=obs_dim, out_dim=act_dim, \
++            total_timesteps=total_timesteps,
++            timesteps_per_batch=timesteps_per_batch, \
++            gamma=gamma, clip=clip, lr=learning_rate)
++    
++    # run training
++    agent.learn()
++    logging.info('Done')
+\ No newline at end of file
