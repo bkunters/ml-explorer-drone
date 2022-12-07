@@ -7,22 +7,22 @@ from stable_baselines3.common.env_util import make_vec_env
 # TODO: Hyperparameters should be the same in baseline and our own implementation
 
 # # Parameters
-# num_total_steps = 25e3           # Total number of time steps to run the training
-# learning_rate_policy = 1e-3     # Learning rate for optimizing the neural networks
-# learning_rate_value = 1e-3
-# num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
-# epsilon = 0.2                   # Epsilon value in the PPO algorithm
-# max_trajectory_size = 10000     # max number of trajectory samples to be sampled per time step. 
-# trajectory_iterations = 16      # number of batches of episodes
-# input_length_net = 4            # input layer size
-# policy_output_size = 2          # policy output layer size
-# discount_factor = 0.99
-# env_name = "CartPole-v1-StableBaseline"  # LunarLander-v2 or MountainCar-v0 or CartPole-v1
-# n_envs = 1                               # amount of envs used simultaneously
+num_total_steps = 25e3           # Total number of time steps to run the training
+learning_rate_policy = 1e-3     # Learning rate for optimizing the neural networks
+learning_rate_value = 1e-3
+num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
+epsilon = 0.2                   # Epsilon value in the PPO algorithm
+max_trajectory_size = 10000     # max number of trajectory samples to be sampled per time step. 
+trajectory_iterations = 16      # number of batches of episodes
+input_length_net = 4            # input layer size
+policy_output_size = 2          # policy output layer size
+discount_factor = 0.99
+n_envs = 1                      # amount of envs used simultaneously
+env_name = "CartPole-v1-StableBaseline3"  # LunarLander-v2 or MountainCar-v0 or CartPole-v1
 
 # Parallel environments
 env_name = "CartPole-v1" # 'Pendulum'
-env = make_vec_env(env_name, n_envs=1) # TODO: @Ardian Check stable_baseline3 library 
+env = make_vec_env(env_name, n_envs=n_envs) # TODO: @Ardian Check stable_baseline3 library 
 
 model = PPO("MlpPolicy", env, verbose=1)
 model.learn(total_timesteps=25000)
