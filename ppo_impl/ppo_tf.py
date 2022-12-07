@@ -168,7 +168,7 @@ while num_passed_timesteps < num_total_steps:
     # Collect trajectory
     sum_rewards = 0
     print("Collecting batch trajectories...")
-    for iter in range(trajectory_iterations):
+    for _ in range(trajectory_iterations):
 
         # collect samples until agent craches
         for batch_k in range(max_trajectory_size):
