@@ -2,6 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.optim import Adam
+from  torch.distributions import multivariate_normal
 import numpy as np
 
 import gym
@@ -65,33 +66,64 @@ class PolicyNet(Net):
 class PPOAgent:
 
     def __init__(self, 
-        env, 
+        env,
         in_dim, 
-        out_dim, 
+        out_dim,
+        total_timesteps, # total_timesteps (number of actions taken in the environments)
+        timesteps_per_batch=2048, # timesteps per batch
+        max_timesteps_per_episode=1000,
+        minibatches=4,
+        cliprange=0.2,
         seed=42, 
         gamma=0.99, 
-        lr=1e-3) -> None:
+        lr=1e-3,
+        n_envs=1) -> None:
 
         # TODO: Fix hyperparameter
         self.env = env
         self.gamma = gamma
         self.lr = lr
+
+        # TODO: All of those timesteps need to be reduced
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.total_timesteps = total_timesteps
+        self.timesteps_per_batch = timesteps_per_batch
+        self.max_timesteps_per_episode = max_timesteps_per_episode
+
         # seed torch, numpy and gym
         self.env.action_space.seed(seed)
         self.env.observation_space.seed(seed)
         torch.manual_seed(seed)
         np.random.seed(seed)
 
+        # TODO: Move this to the network defintion
         # add net for actor and critic
-        self.policyNet = PolicyNet(in_dim, out_dim)
-        self.valueNet = ValueNet(in_dim, 1)
+        self.policyNet = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor)
+        self.valueNet = ValueNet(self.in_dim, 1) # Setup Value Network (Critic)
 
-        # add optimizer
-        self.policyNet_optim = Adam(self.policyNet.parameters(), lr=self.lr)
-        self.valueNet_optim = Adam(self.valueNet.parameters(), lr=self.lr)
+        # add optimizer for actor and critic
+        self.policyNet_optim = Adam(self.policyNet.parameters(), lr=self.lr) # Setup Policy Network (Actor) optimizer
+        self.valueNet_optim = Adam(self.valueNet.parameters(), lr=self.lr)  # Setup Value Network (Critic) optimizer
 
-    def step(self):
-        pass
+    def step(self, obs):
+        """ Given an observation, get action and probabilities from policy network (actor)"""
+        means = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
+        
+        # Multivariate Normal Distribution Lecture 15.7 (Andrew Ng) https://www.youtube.com/watch?v=JjB58InuTqM
+        # fixes the detection of outliers, allows to capture correlation between features
+        # https://discuss.pytorch.org/t/understanding-log-prob-for-normal-distribution-in-pytorch/73809
+        # 1) Use Normal distribution for continuous space
+        # 2) Use Categorial distribution for discrete space
+        cov_matrix = torch.diag(torch.full(size=(self.out_dim,), fill_value=0.5))
+        dist = multivariate_normal.MultivariateNormal(covariance_matrix=cov_matrix)
+        log_prob = dist.log_prob(means)
+        action = dist.sample()
+        # detach and convert to numpy array
+        action, log_prob = action.detach().numpy(), log_prob.detach().numpy()
+        logging.info(f'Sampled action {action}')
+        logging.info(f'Sampled probability {log_prob}')
+        return action, log_prob
 
     def policy(self):
         pass
@@ -99,23 +131,70 @@ class PPOAgent:
     def finish_episode(self):
         pass
 
-    def collect_rollout(self, state, n_step=1):
-        rollout, done = [], False
-        for _ in range(n_step): 
-            pass
+    def collect_rollout(self):
+        """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
+        
+        episode_lengths_per_batch = [] # lengths of each episode this batch 
+        observations_per_batch = [] # observations for this batch - shape (n_timesteps, dim observations)
+        actions_per_batch = [] # actions for this batch - shape (n_timesteps, dim actions)
+        log_probs_per_batch = [] # log probabilities per action this batch - shape (n_timesteps)
+        rewards_per_batch = [] # rewards collected this batch - shape (n_timesteps)
+        rewards2go_per_batch = [] # rewards-to-go this batch (R_t) - shape (n_timesteps)
+        rewards_per_episode = [] # track rewards per episode
+
+        timesteps_simulated = 0 # number of timesteps simulated
+        while timesteps_simulated < self.timesteps_per_batch:
+
+            rewards_per_episode = []
+            next_obs, info = self.env.reset()
+            done = False 
+
+            for episode in range(1, self.max_timesteps_per_episode):
+
+                observations_per_batch.appen(next_obs)
+
+                timesteps_simulated += 1
+                
+                action = self.step(next_obs)
+                next_obs, reward, done, truncated = self.env.step(action)
+
+
+
+                if done or truncated:
+                    # break out of loop if episode is terminated
+                    break
+
 
     def train(self):
         pass
 
     def learn(self):
-        pass
+        
+        nupdates = self.total_timesteps//self.batch_size
+
+        # logging info 
+        logging.info(f'Updating the network...')
+        logging.info(f'Running {self.n_steps} timesteps per batch for a total of {self.nupdates} timesteps')
+
+        timesteps_simulated = 0 # number of timesteps simulated
+        iterations = 0 # number of iterations
+
+        while timesteps_simulated < self.total_timesteps:
+            # simulate and collect trajectories
+            pass
+
 
 
 ####################
 ####################
 
-def make_env(gym_id='Pendulum-v1'):
-    return gym.make(gym_id)
+def arg_parser():
+    pass 
+
+def make_env(env_id='Pendulum-v1', seed=42):
+    # TODO: Needs to be parallized for parallel simulation
+    env = gym.make(env_id)
+    return env
 
 def train():
     # TODO Add Checkpoints to load model 
@@ -145,5 +224,8 @@ if __name__ == '__main__':
 
     logging.info(f'env observation dim: {obs_dim}')
     logging.info(f'env action dim: {act_dim}')
+    # upper and lower bound describing the values our observations can take
+    logging.info(f'upper bound for env observation: {env.observation_space.high}')
+    logging.info(f'lower bound for env observation: {env.observation_space.low}')
 
-    agent = PPOAgent(env, in_dim=obs_dim, out_dim=act_dim, lr=learning_rate)
+    agent = PPOAgent(env, in_dim=obs_dim, out_dim=act_dim, total_timesteps=num_total_steps, lr=learning_rate)
