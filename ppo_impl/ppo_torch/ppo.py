@@ -88,7 +88,7 @@ class PolicyNet(Net):
 
 class PPO_PolicyGradient:
 
-    def __init__(self, 
+    def __init__(self, # TODO: Change hyperparams
         env,
         in_dim, 
         out_dim,
@@ -173,7 +173,7 @@ class PPO_PolicyGradient:
         amount = len(rewards)
         reward_to_go = np.zeros_like(rewards)
         for i in reversed(range(amount)):
-            # TODO: Check this function is a discount factor? 
+            # TODO: Bug found. Check this function is a discount factor? 
             reward_to_go[i] = rewards[i] + (reward_to_go[i+1] if i+1 < amount else 0)
         return torch.tensor(reward_to_go, dtype=torch.float)
 
@@ -227,7 +227,7 @@ class PPO_PolicyGradient:
                 torch.tensor(rewards_to_go_per_batch), \
                 episode_lengths_per_batch
 
-    def train(self, obs, actions, rewards, log_probs, advantages):
+    def train(self, obs, actions, rewards, advantages, log_probs):
         """Calculate loss and update weights of both networks."""
         self.policyNet_optim.zero_grad() # reset optimizer
         policy_loss = self.policyNet.loss(obs, actions, advantages, log_probs)
@@ -254,13 +254,13 @@ class PPO_PolicyGradient:
 
             for _ in range(self.n_updates_per_iteration):
                 # calculate loss and update weights
-                self.train(observations, actions, rewards2go, advantages)
+                self.train(observations, actions, rewards2go, advantages, log_probs)
             
             # monitoring W&B
             wandb.log({
                 'episode length': episode_length_per_batch,
-                'mean reward': np.mean(rewards2go.detach().numpy()), 
-                'sum rewards': np.sum(rewards2go.detach().numpy())
+                'mean reward': np.mean(rewards2go.detach().numpy()), # TODO: Check values here correct
+                'sum rewards': np.sum(rewards2go.detach().numpy()) # TODO: Check values here correct
                 })
 
 ####################
