@@ -63,7 +63,7 @@ class PolicyNet(Net):
 ####################
 
 
-class PPOAgent:
+class Clip_PPO_PolicyGradient:
 
     def __init__(self, 
         env,
@@ -108,22 +108,33 @@ class PPOAgent:
 
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
-        means = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
-        
         # Multivariate Normal Distribution Lecture 15.7 (Andrew Ng) https://www.youtube.com/watch?v=JjB58InuTqM
         # fixes the detection of outliers, allows to capture correlation between features
         # https://discuss.pytorch.org/t/understanding-log-prob-for-normal-distribution-in-pytorch/73809
         # 1) Use Normal distribution for continuous space
         # 2) Use Categorial distribution for discrete space
+        
+        means = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
         cov_matrix = torch.diag(torch.full(size=(self.out_dim,), fill_value=0.5))
         dist = multivariate_normal.MultivariateNormal(covariance_matrix=cov_matrix)
         log_prob = dist.log_prob(means)
         action = dist.sample()
+
         # detach and convert to numpy array
         action, log_prob = action.detach().numpy(), log_prob.detach().numpy()
         logging.info(f'Sampled action {action}')
         logging.info(f'Sampled probability {log_prob}')
         return action, log_prob
+
+    def rewards_to_go(self, rewards):
+        """Calculate rewards to go to reduce the variance in the policy gradient"""
+        # Lecture 5, p. 17: UCB http://rail.eecs.berkeley.edu/deeprlcourse/static/slides/lec-5.pdf
+        # Open AI Documentation: https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#implementing-reward-to-go-policy-gradient
+        n = len(rewards)
+        rtgs = np.zeros_like(rewards)
+        for i in reversed(range(n)):
+            rtgs[i] = rewards[i] + (rtgs[i+1] if i+1 < n else 0)
+        return rtgs
 
     def policy(self):
         pass
@@ -139,37 +150,44 @@ class PPOAgent:
         actions_per_batch = [] # actions for this batch - shape (n_timesteps, dim actions)
         log_probs_per_batch = [] # log probabilities per action this batch - shape (n_timesteps)
         rewards_per_batch = [] # rewards collected this batch - shape (n_timesteps)
-        rewards2go_per_batch = [] # rewards-to-go this batch (R_t) - shape (n_timesteps)
         rewards_per_episode = [] # track rewards per episode
 
         timesteps_simulated = 0 # number of timesteps simulated
         while timesteps_simulated < self.timesteps_per_batch:
 
             rewards_per_episode = []
-            next_obs, info = self.env.reset()
+            # reset environment for new episode
+            next_obs, _ = self.env.reset() 
             done = False 
 
-            for episode in range(1, self.max_timesteps_per_episode):
-
-                observations_per_batch.appen(next_obs)
-
-                timesteps_simulated += 1
+            for episode in range(self.max_timesteps_per_episode):
                 
-                action = self.step(next_obs)
+                timesteps_simulated += 1
+                observations_per_batch.appen(next_obs)
+                action, log_probability = self.step(next_obs)
                 next_obs, reward, done, truncated = self.env.step(action)
 
-
-
+                # tracking of values
+                actions_per_batch.append(action)
+                log_probs_per_batch.append(log_probability)
+                rewards_per_episode(reward)
+                
+                # break out of loop if episode is terminated
                 if done or truncated:
-                    # break out of loop if episode is terminated
                     break
+            
+            rewards_per_batch(reward)
+            episode_lengths_per_batch(episode + 1) # how long was the episode + 1 as we start at 0
+            rewards_to_go_per_batch = self.rewards_to_go(rewards_per_batch, dtype=torch.float)
 
-
-    def train(self):
-        pass
+        return torch.tensor(observations_per_batch, dtype=torch.float), \
+                torch.tensor(actions_per_batch, dtype=torch.float), \
+                torch.tensor(log_probs_per_batch, dtype=torch.float), \
+                torch.tensor(rewards_to_go_per_batch), \
+                episode_lengths_per_batch
 
     def learn(self):
-        
+        """"""
         nupdates = self.total_timesteps//self.batch_size
 
         # logging info 
@@ -181,8 +199,10 @@ class PPOAgent:
 
         while timesteps_simulated < self.total_timesteps:
             # simulate and collect trajectories
-            pass
+            batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens = self.collect_rollout()
 
+    def train(self):
+        pass
 
 
 ####################
@@ -228,4 +248,4 @@ if __name__ == '__main__':
     logging.info(f'upper bound for env observation: {env.observation_space.high}')
     logging.info(f'lower bound for env observation: {env.observation_space.low}')
 
-    agent = PPOAgent(env, in_dim=obs_dim, out_dim=act_dim, total_timesteps=num_total_steps, lr=learning_rate)
+    agent = Clip_PPO_PolicyGradient(env, in_dim=obs_dim, out_dim=act_dim, total_timesteps=num_total_steps, lr=learning_rate)
