@@ -3,6 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.optim import Adam
 from  torch.distributions import multivariate_normal
+from torch.distributions import Categorical
 import numpy as np
 
 import gym
@@ -23,7 +24,7 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
 class ValueNet(Net):
-
+    """Setup Value Network (Critic) optimizer"""
     def __init__(self, in_dim, out_dim) -> None:
         super(ValueNet, self).__init__()
         self.layer1 = nn.Linear(in_dim, 64)
@@ -35,13 +36,15 @@ class ValueNet(Net):
             obs = torch.tensor(obs, dtype=torch.float)
         x = F.relu(self.layer1(obs))
         x = F.relu(self.layer2(x))
-        return self.layer3(x)
+        out = self.layer3(x)
+        return out
     
-    def loss(self, states, returns):
-        pass
+    def loss(self, obs, rewards):
+        """Objective function defined by mean-squared error"""
+        return ((rewards - self(obs))**2).mean() # regression
 
 class PolicyNet(Net):
-
+    """Setup Policy Network (Actor)"""
     def __init__(self, in_dim, out_dim) -> None:
         super(PolicyNet, self).__init__()
         self.layer1 = nn.Linear(in_dim, 64)
@@ -53,9 +56,13 @@ class PolicyNet(Net):
             obs = torch.tensor(obs, dtype=torch.float)
         x = F.relu(self.layer1(obs))
         x = F.relu(self.layer2(x))
-        return self.layer3(x)
+        out = self.layer3(x)
+        return out
     
-    def loss(self, states, actions, advantages):
+    def loss(self, obs, actions, advantages):
+        # TODO: Implement clipped objective function
+        # 1. Calculate V_phi and pi_theta(a_t | s_t)
+        # 2. Calculate ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
         pass
 
 
@@ -83,7 +90,7 @@ class PPO_PolicyGradient:
         self.gamma = gamma
         self.lr = lr
 
-        # TODO: All of those timesteps need to be reduced
+        # TODO: Check these values
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.total_timesteps = total_timesteps
@@ -106,16 +113,25 @@ class PPO_PolicyGradient:
         self.valueNet_optim = Adam(self.valueNet.parameters(), lr=self.lr)  # Setup Value Network (Critic) optimizer
 
     def get_discrete_action_dist(self, obs):
-        pass 
+        """Make function to compute action distribution in discrete action space."""
+        # 2) Use Categorial distribution for discrete space
+        # https://pytorch.org/docs/stable/distributions.html
+        action_prob = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
+        return Categorical(logits=action_prob)
+
 
     def get_continuous_action_dist(self, obs):
         """Make function to compute action distribution in continuous action space."""
+        # Multivariate Normal Distribution Lecture 15.7 (Andrew Ng) https://www.youtube.com/watch?v=JjB58InuTqM
+        # fixes the detection of outliers, allows to capture correlation between features
+        # https://discuss.pytorch.org/t/understanding-log-prob-for-normal-distribution-in-pytorch/73809
         # 1) Use Normal distribution for continuous space
         action_prob = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
         cov_matrix = torch.diag(torch.full(size=(self.out_dim,), fill_value=0.5))
         return multivariate_normal.MultivariateNormal(action_prob, covariance_matrix=cov_matrix)
 
     def get_action(self, dist):
+        """Sample a random action from distribution."""
         action = dist.sample()
         log_prob = dist.log_prob(action)
         return action, log_prob
@@ -124,26 +140,15 @@ class PPO_PolicyGradient:
         value = self.valueNet.forward(obs)
         return value
 
-
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
-        # Multivariate Normal Distribution Lecture 15.7 (Andrew Ng) https://www.youtube.com/watch?v=JjB58InuTqM
-        # fixes the detection of outliers, allows to capture correlation between features
-        # https://discuss.pytorch.org/t/understanding-log-prob-for-normal-distribution-in-pytorch/73809
-        # 1) Use Normal distribution for continuous space
-        # 2) Use Categorial distribution for discrete space
-
-        action_prob = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
-        cov_matrix = torch.diag(torch.full(size=(self.out_dim,), fill_value=0.5))
-        action_dist = multivariate_normal.MultivariateNormal(action_prob, covariance_matrix=cov_matrix)
-        log_prob = action_dist.log_prob(action_prob)
-        action = action_dist.sample()
+        action_dist = self.get_continuous_action_dist(obs)
+        action, log_prob = self.get_action(action_dist)
 
         # detach and convert to numpy array
-        action, log_prob = action.detach().numpy(), log_prob.detach().numpy()
         logging.info(f'Sampled action {action}')
         logging.info(f'Sampled probability {log_prob}')
-        return action, log_prob
+        return action.detach().numpy(), log_prob.detach().numpy()
 
     def rewards_to_go(self, rewards):
         """Calculate rewards to go to reduce the variance in the policy gradient"""
@@ -152,18 +157,13 @@ class PPO_PolicyGradient:
         amount = len(rewards)
         reward_to_go = np.zeros_like(rewards)
         for i in reversed(range(amount)):
-            # TODO: Check if there is a discount factor? 
+            # TODO: Check this function is a discount factor? 
             reward_to_go[i] = rewards[i] + (reward_to_go[i+1] if i+1 < amount else 0)
         return reward_to_go
 
-    def advantage(self, rewards):
-        pass
-
-    def policy(self):
-        pass
-
-    def finish_episode(self):
-        pass
+    def advantage(self, rewards, values):
+        """Simplest advantage calculation"""
+        return rewards - values # TODO: Eventually normalize advantage (?) if training is very instable
 
     def collect_rollout(self):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
@@ -211,21 +211,33 @@ class PPO_PolicyGradient:
                 torch.tensor(rewards_to_go_per_batch), \
                 episode_lengths_per_batch
 
+    def train(self, obs, actions, rewards, advantages):
+        """Calculate loss and update weights of both networks."""
+        self.policyNet_optim.zero_grad() # reset optimizer
+        policy_loss = self.policyNet.loss(obs, actions, advantages)
+        policy_loss.backward()
+
+        self.valueNet_optim.zero_grad()
+        value_loss = self.valueNet.loss(obs, rewards)
+        value_loss.backward()
+        
     def learn(self):
         """"""
-        nupdates = self.total_timesteps//self.batch_size
-
         # logging info 
         logging.info(f'Updating the network...')
-        # logging.info(f'Running {self.n_steps} timesteps per batch for a total of {self.nupdates} timesteps')
-
         timesteps_simulated = 0 # number of timesteps simulated
         iterations = 0 # number of iterations
 
         while timesteps_simulated < self.total_timesteps:
             # simulate and collect trajectories
             observations, actions, log_probs, rewards2go, episode_length_per_batch = self.collect_rollout()
+            # calculate the advantage of current iteration
+            values = self.valueNet.forward(observations).detach()
+            advantage = self.advantage(rewards2go, values.squeeze())
 
+            for _ in range(self.n_updates_per_iteration):
+                pass
+    
 
 ####################
 ####################
