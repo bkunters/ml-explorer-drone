@@ -45,12 +45,13 @@ class ValueNet(Net):
         self.layer1 = nn.Linear(in_dim, 64)
         self.layer2 = nn.Linear(64, 64)
         self.layer3 = nn.Linear(64, out_dim)
+        self.relu = nn.ReLU()
     
     def forward(self, obs):
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float)
-        x = F.relu(self.layer1(obs))
-        x = F.relu(self.layer2(x))
+        x = self.relu(self.layer1(obs))
+        x = self.relu(self.layer2(x))
         out = self.layer3(x)
         return out
     
@@ -65,24 +66,25 @@ class PolicyNet(Net):
         self.layer1 = nn.Linear(in_dim, 64)
         self.layer2 = nn.Linear(64, 64)
         self.layer3 = nn.Linear(64, out_dim)
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax()
 
     def forward(self, obs, act=None):
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float)
-        x = F.relu(self.layer1(obs))
-        x = F.relu(self.layer2(x))
-        out = self.layer3(x)
+        x = self.relu(self.layer1(obs))
+        x = self.relu(self.layer2(x))
+        out = self.softmax(self.layer3(x))
         return out
     
-    def loss(self, obs, action_log_probs, v_log_probs, clip_eps=0.2):
+    def loss(self, advantages, action_log_probs, v_log_probs, clip_eps=0.2):
         """Make the clipped objective function to compute loss."""
-        ratio = torch.div(v_log_probs, action_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
-        clip_1 = torch.matmul(ratio, obs)
-        clip = torch.clamp(ratio, min=1.0-clip_eps, max=1.0+clip_eps)
-        clip_2 = torch.matmul(clip, obs)
-        min_val = torch.minimum(clip_1, clip_2)
-        mean = torch.mean(min_val)
-        policy_loss = torch.neg(mean)
+        ratio = torch.exp(v_log_probs - action_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
+        clip_1 = torch.mul(ratio, advantages)
+        clip = torch.clamp(ratio, min=1.0 - clip_eps, max=1.0 + clip_eps)
+        clip_2 = torch.mul(clip, advantages)
+        min_val = torch.min(clip_1, clip_2)
+        policy_loss = torch.neg(min_val).mean()
         return policy_loss
 
 
@@ -166,17 +168,12 @@ class PPO_PolicyGradient:
         """ Given an observation, get action and probabilities from policy network (actor)"""
         action_dist = self.get_continuous_policy(obs)
         action, log_prob = self.get_action(action_dist)
-
-        # detach and convert to numpy array
-        logging.info(f'Sampled action {action}')
-        logging.info(f'Sampled probability {log_prob}')
         return action.detach().numpy(), log_prob.detach().numpy()
 
     def rewards_to_go(self, rewards):
         """Calculate rewards to go to reduce the variance in the policy gradient"""
         # Lecture 5, p. 17 UCB Causality issue: http://rail.eecs.berkeley.edu/deeprlcourse/static/slides/lec-5.pdf
         # Open AI Documentation: https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#implementing-reward-to-go-policy-gradient
-        logging.info(f'Calculate rewards2go with {rewards}')
         reward_to_go = []
         # TODO: Fix the following is incorrect
         for ep_rewards in reversed(rewards): # iterate over rewards per episode
@@ -185,7 +182,6 @@ class PPO_PolicyGradient:
             for i in reversed(range(len(ep_rewards))):
                 rtgs[i] = ep_rewards[i] + (rtgs[i+1] if i+1 < amount else 0)
             reward_to_go.append(rtgs)
-            logging.info(f'rewards summed up: {rtgs}')
         return torch.tensor(np.array(reward_to_go), dtype=torch.float)
 
     def cummulative_reward(self, rewards):
@@ -202,6 +198,7 @@ class PPO_PolicyGradient:
     def advantage_estimate(self, rewards, values):
         """Simplest advantage calculation"""
         # STEP 5: compute advantage estimates A_t
+        # TODO: eventually normalize advantage if training is instable
         return rewards - values 
     
     def generalized_advantage_estimate(self):
@@ -209,17 +206,16 @@ class PPO_PolicyGradient:
 
     def collect_rollout(self):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
-        
-        logging.info(f'Rollout collecting sample data ...')
-        
+        # logging info
+        logging.info('Rollout collecting sample data ...')
         episode_lengths_per_batch = [] # lengths of each episode this batch 
         observations_per_batch = [] # observations for this batch - shape (n_timesteps, dim observations)
         actions_per_batch = [] # actions for this batch - shape (n_timesteps, dim actions)
         log_probs_per_batch = [] # log probabilities per action this batch - shape (n_timesteps)
         rewards_per_batch = [] # rewards collected this batch - shape (n_timesteps)
 
-        timesteps_simulated = 0 # number of timesteps simulated
-        while timesteps_simulated < self.timesteps_per_batch:
+        t_simulated = 0 # number of timesteps simulated
+        while t_simulated < self.timesteps_per_batch:
 
             # track rewards per episode
             rewards_per_episode = []
@@ -229,7 +225,7 @@ class PPO_PolicyGradient:
 
             for episode in range(self.timesteps_per_episode):
                 # Run an episode 
-                timesteps_simulated += 1
+                t_simulated += 1
                 observations_per_batch.append(next_obs)
                 action, log_probability = self.step(next_obs)
                 
@@ -259,22 +255,22 @@ class PPO_PolicyGradient:
     def train(self, obs, rewards, advantages, action_log_probs, v_log_probs, clip):
         """Calculate loss and update weights of both networks."""
         self.policyNet_optim.zero_grad() # reset optimizer
-        policy_loss = self.policy_net.loss(obs, action_log_probs, v_log_probs, clip)
+        policy_loss = self.policy_net.loss(advantages, action_log_probs, v_log_probs, clip)
         policy_loss.backward()
 
-        self.value_net_optim.zero_grad()
+        self.value_net_optim.zero_grad() # reset optimizer
         value_loss = self.value_net.loss(obs, rewards)
         value_loss.backward()
 
-        # monitoring W&B
+        # logging for monitoring in W&B
         wandb.log({'policy loss': policy_loss, 'value loss': value_loss})
 
     def learn(self):
         """"""
         # logging info 
-        logging.info(f'Updating the network...')
-        timesteps_simulated = 0 # number of timesteps simulated
-        while timesteps_simulated < self.total_timesteps:
+        logging.info('Updating the network...')
+        t_simulated = 0 # number of timesteps simulated
+        while t_simulated < self.total_timesteps:
             # STEP 3-4: imulate and collect trajectories --> the following values are all per batch
             observations, actions, action_log_probs, rewards2go, episode_length_per_batch = self.collect_rollout()
             # calculate the advantage of current iteration
@@ -324,7 +320,7 @@ if __name__ == '__main__':
     learning_rate = 1e-3
     gamma = 0.99 
     clip = 0.2
-    env_name = 'Pendulum-v1' #'CartPole-v1'
+    env_name = 'Pendulum-v1' #'CartPole-v1' 'Pendulum-v1', 'MountainCar-v0'
 
     # Configure logger
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -332,8 +328,14 @@ if __name__ == '__main__':
     env = make_env(env_name)
     # get dimensions of observations (what goes in?)
     # and actions (what goes out?)
-    obs_dim = env.observation_space.shape[0] 
-    act_dim = env.action_space.shape[0]
+    obs_shape = env.observation_space.shape
+    act_shape = env.action_space.shape
+
+    logging.info(f'env observation space: {obs_shape}')
+    logging.info(f'env action space: {act_shape}')
+    
+    obs_dim = obs_shape[0] 
+    act_dim = act_shape[0]
 
     logging.info(f'env observation dim: {obs_dim}')
     logging.info(f'env action dim: {act_dim}')
@@ -369,3 +371,6 @@ if __name__ == '__main__':
     # run training
     agent.learn()
     logging.info('Done')
+    # cleanup 
+    env.close()
+    wandb.run.finish() if wandb and wandb.run else None
