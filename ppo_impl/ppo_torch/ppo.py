@@ -94,8 +94,8 @@ class PPO_PolicyGradient:
         out_dim,
         total_timesteps=10000,
         timesteps_per_batch=2048, # timesteps per batch (number of actions taken in the environments)
-        max_timesteps_per_episode=1600, # (number of actions taken in the environments)
-        n_updates_per_iteration=5,
+        timesteps_per_episode=1600, # timesteps per episode
+        updates=5,
         clip=0.2,
         gamma=0.99, 
         lr=1e-3,
@@ -103,6 +103,7 @@ class PPO_PolicyGradient:
 
         # TODO: Check these values --> maybe simplify
         self.env = env
+        self.seed = seed
         self.gamma = gamma
         self.lr = lr
         self.clip = clip
@@ -110,8 +111,8 @@ class PPO_PolicyGradient:
         self.out_dim = out_dim
         self.total_timesteps = total_timesteps
         self.timesteps_per_batch = timesteps_per_batch
-        self.max_timesteps_per_episode = max_timesteps_per_episode
-        self.n_update_per_iteration = n_updates_per_iteration
+        self.timesteps_per_episode = timesteps_per_episode
+        self.updates = updates
 
         # seed torch, numpy and gym
         self.env.action_space.seed(seed)
@@ -121,18 +122,18 @@ class PPO_PolicyGradient:
 
         # TODO: Move this to the network defintion
         # add net for actor and critic
-        self.policyNet = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor)
-        self.valueNet = ValueNet(self.in_dim, 1) # Setup Value Network (Critic)
+        self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor)
+        self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic)
 
         # add optimizer for actor and critic
-        self.policyNet_optim = Adam(self.policyNet.parameters(), lr=self.lr) # Setup Policy Network (Actor) optimizer
-        self.valueNet_optim = Adam(self.valueNet.parameters(), lr=self.lr)  # Setup Value Network (Critic) optimizer
+        self.policyNet_optim = Adam(self.policy_net.parameters(), lr=self.lr) # Setup Policy Network (Actor) optimizer
+        self.value_net_optim = Adam(self.value_net.parameters(), lr=self.lr)  # Setup Value Network (Critic) optimizer
 
     def get_discrete_policy(self, obs):
         """Make function to compute action distribution in discrete action space."""
         # 2) Use Categorial distribution for discrete space
         # https://pytorch.org/docs/stable/distributions.html
-        action_prob = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
+        action_prob = self.policy_net.forward(obs) # query Policy Network (Actor) for mean action
         return Categorical(logits=action_prob)
 
     def get_continuous_policy(self, obs):
@@ -141,7 +142,7 @@ class PPO_PolicyGradient:
         # fixes the detection of outliers, allows to capture correlation between features
         # https://discuss.pytorch.org/t/understanding-log-prob-for-normal-distribution-in-pytorch/73809
         # 1) Use Normal distribution for continuous space
-        action_prob = self.policyNet.forward(obs) # query Policy Network (Actor) for mean action
+        action_prob = self.policy_net.forward(obs) # query Policy Network (Actor) for mean action
         cov_matrix = torch.diag(torch.full(size=(self.out_dim,), fill_value=0.5))
         return multivariate_normal.MultivariateNormal(action_prob, covariance_matrix=cov_matrix)
 
@@ -152,7 +153,7 @@ class PPO_PolicyGradient:
         return action, log_prob
         
     def get_value(self, obs):
-        value = self.valueNet.forward(obs)
+        value = self.value_net.forward(obs)
         return value
 
     def step(self, obs):
@@ -169,18 +170,34 @@ class PPO_PolicyGradient:
         """Calculate rewards to go to reduce the variance in the policy gradient"""
         # Lecture 5, p. 17 UCB Causality issue: http://rail.eecs.berkeley.edu/deeprlcourse/static/slides/lec-5.pdf
         # Open AI Documentation: https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#implementing-reward-to-go-policy-gradient
-        logging.info(f'Calculate rewards2go with batch rewards: {rewards}')
-        amount = len(rewards)
-        reward_to_go = np.zeros_like(rewards)
-        for ep_reward in reversed(range(amount)): # iterate over rewards per episode
-            for i in reversed(range(ep_reward)):
-                pass
-            # reward_to_go[i] = rewards[i] + (reward_to_go[i+1] if i+1 < amount else 0)
-        return torch.tensor(reward_to_go, dtype=torch.float)
+        logging.info(f'Calculate rewards2go with {rewards}')
+        reward_to_go = []
+        # TODO: Fix the following is incorrect
+        for ep_rewards in reversed(rewards): # iterate over rewards per episode
+            rtgs = np.zeros_like(ep_rewards)
+            amount = len(rewards)
+            for i in reversed(range(len(ep_rewards))):
+                rtgs[i] = ep_rewards[i] + (rtgs[i+1] if i+1 < amount else 0)
+            reward_to_go.append(rtgs)
+            logging.info(f'rewards summed up: {rtgs}')
+        return torch.tensor(np.array(reward_to_go), dtype=torch.float)
+
+    def cummulative_reward(self, rewards):
+        # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
+        # G(t) = R(t) + gamma * R(t-1)
+        cum_rewards = []
+        for ep_rewards in reversed(rewards):
+            cumulate_discount = 0
+            for reward in reversed(ep_rewards):
+                cumulate_discount = reward + (self.gamma * cumulate_discount)
+                cum_rewards.append(cumulate_discount)
+        return torch.tensor(np.array(cum_rewards))
 
     def advantage(self, rewards, values):
         """Simplest advantage calculation"""
-        return rewards - values # TODO: Correct? Eventually normalize advantage (?) if training is very instable
+        logging.info('Rewards size {}'.format(rewards.size()))
+        logging.info('Values size {}'.format(values.size()))
+        return rewards - values 
 
     def collect_rollout(self):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
@@ -202,11 +219,14 @@ class PPO_PolicyGradient:
             next_obs = self.env.reset() 
             done = False 
 
-            for episode in range(self.max_timesteps_per_episode):
+            for episode in range(self.timesteps_per_episode):
                 # Run an episode 
                 timesteps_simulated += 1
                 observations_per_batch.append(next_obs)
                 action, log_probability = self.step(next_obs)
+                
+                # STEP 3: collecting set of trajectories D_k by running action 
+                # that was sampled from policy in environment
                 next_obs, reward, done, truncated = self.env.step(action)
 
                 # tracking of values
@@ -220,22 +240,22 @@ class PPO_PolicyGradient:
             
             rewards_per_batch.append(rewards_per_episode)
             episode_lengths_per_batch.append(episode + 1) # how long was the episode + 1 as we start at 0
-            rewards_to_go_per_batch = self.rewards_to_go(rewards_per_batch)
+            # STEP 4: Calculate rewards to go R_t
+            rewards_to_go_per_batch = self.cummulative_reward(rewards_per_batch)
 
         return torch.tensor(np.array(observations_per_batch), dtype=torch.float), \
                 torch.tensor(np.array(actions_per_batch), dtype=torch.float), \
                 torch.tensor(np.array(log_probs_per_batch), dtype=torch.float), \
-                torch.tensor(rewards_to_go_per_batch), \
-                episode_lengths_per_batch
+                rewards_to_go_per_batch, episode_lengths_per_batch
 
     def train(self, obs, actions, rewards, advantages, log_probs):
         """Calculate loss and update weights of both networks."""
         self.policyNet_optim.zero_grad() # reset optimizer
-        policy_loss = self.policyNet.loss(obs, actions, advantages, log_probs)
+        policy_loss = self.policy_net.loss(obs, actions, advantages, log_probs)
         policy_loss.backward()
 
-        self.valueNet_optim.zero_grad()
-        value_loss = self.valueNet.loss(obs, rewards)
+        self.value_net_optim.zero_grad()
+        value_loss = self.value_net.loss(obs, rewards)
         value_loss.backward()
 
         # monitoring W&B
@@ -250,10 +270,10 @@ class PPO_PolicyGradient:
             # simulate and collect trajectories --> the following values are all per batch
             observations, actions, log_probs, rewards2go, episode_length_per_batch = self.collect_rollout()
             # calculate the advantage of current iteration
-            values = self.valueNet.forward(observations).detach()
-            advantages = self.advantage(rewards2go, values.squeeze())
+            values = self.value_net.forward(observations).squeeze()
+            advantages = self.advantage(rewards2go, values.detach())
 
-            for _ in range(self.n_updates_per_iteration):
+            for _ in range(self.updates):
                 # calculate loss and update weights
                 self.train(observations, actions, rewards2go, advantages, log_probs)
             
@@ -288,8 +308,8 @@ if __name__ == '__main__':
     unity_file_name = ''
     total_timesteps = 1000
     timesteps_per_batch = 4800
-    max_timesteps_per_episode = 1600
-    n_updates_per_iteration = 5
+    timesteps_per_episode = 1600
+    updates = 5
     learning_rate = 1e-3
     gamma = 0.99 
     clip = 0.2
@@ -319,7 +339,7 @@ if __name__ == '__main__':
     sync_tensorboard=True,
     config={ # stores hyperparams in job
             'timesteps per batch': timesteps_per_batch,
-            'updates per iteration': n_updates_per_iteration,
+            'updates per iteration': updates,
             'input layer size': obs_dim,
             'output layer size': act_dim,
             'learning rate': learning_rate,
