@@ -22,7 +22,7 @@ import wandb
 
 # This is a TODO Section - please mark a todo as (done) if done
 # 0) Check current implementation against article: https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/
-# 1) Adjust code for discrete domain --> test with CartPole
+# 1) Check code for discrete domain --> test with CartPole (adjust beforehand)
 # 2) Check code for continuous domain --> test with Pendulum
 # 3) Implement Surrogate clipping loss
 # 4) Fix calculation of Advantage
@@ -206,8 +206,6 @@ class PPO_PolicyGradient:
 
     def collect_rollout(self):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
-        # logging info
-        logging.info('Rollout collecting sample data ...')
         episode_lengths_per_batch = [] # lengths of each episode this batch 
         observations_per_batch = [] # observations for this batch - shape (n_timesteps, dim observations)
         actions_per_batch = [] # actions for this batch - shape (n_timesteps, dim actions)
