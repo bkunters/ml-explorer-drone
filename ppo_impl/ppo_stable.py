@@ -1,13 +1,14 @@
 import gym
 
+# requires gym==0.21.0 & pyglet==1.5.27
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 
 # Parallel environments
-env = make_vec_env("CartPole-v1", n_envs=4)
+env = make_vec_env("CartPole-v1", n_envs=1)
 
 model = PPO("MlpPolicy", env, verbose=1)
-model.learn(total_timesteps=25000)
+model.learn(total_timesteps=50000, progress_bar=True)
 model.save("ppo_cartpole")
 
 del model # remove to demonstrate saving and loading
