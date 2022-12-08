@@ -188,7 +188,7 @@ for epochs in range(num_total_steps):
             current_action = current_action_dist.sample(seed=42).numpy()[0]
             trajectory_actions.append(current_action)
 
-            # Sample new state
+            # Sample new state etc. from environment
             observation, reward, terminated, truncated, info = env.step(current_action)
             num_passed_timesteps += 1
             sum_rewards += reward
@@ -229,7 +229,7 @@ for epochs in range(num_total_steps):
     trajectory_advantages    = tf.squeeze(trajectory_advantages)
     trajectory_advantages    = (trajectory_advantages - np.mean(trajectory_advantages)) / (np.std(trajectory_advantages) + 1e-8)
 
-    # Update loop
+    # Update the network loop
     print("Updating the neural networks...")
     for epoch in range(num_epochs):
 

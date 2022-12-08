@@ -55,5 +55,12 @@ urllib3==1.26.13
 Werkzeug==2.2.2
 wrapt==1.14.1
 
+# PPO Clipped requirements
+
+# gym
+# tensorflow
+# tensorflow_probability==0.12.2
+# numpy 
+
 # Logging
 wandb
