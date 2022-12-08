@@ -74,12 +74,16 @@ class PolicyNet(Net):
         out = self.layer3(x)
         return out
     
-    def loss(self, obs, actions, advantages, log_probs):
-        # TODO: Implement clipped objective function
-        # 1. Calculate V_phi and pi_theta(a_t | s_t)
-        # 2. Calculate ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
-        # 3. ... 
-        pass
+    def loss(self, obs, action_log_probs, v_log_probs, clip_eps=0.2):
+        """Make the clipped objective function to compute loss."""
+        ratio = torch.div(v_log_probs, action_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
+        clip_1 = torch.matmul(ratio, obs)
+        clip = torch.clamp(ratio, min=1.0-clip_eps, max=1.0+clip_eps)
+        clip_2 = torch.matmul(clip, obs)
+        min_val = torch.minimum(clip_1, clip_2)
+        mean = torch.mean(min_val)
+        policy_loss = torch.neg(mean)
+        return policy_loss
 
 
 ####################
@@ -147,14 +151,16 @@ class PPO_PolicyGradient:
         return multivariate_normal.MultivariateNormal(action_prob, covariance_matrix=cov_matrix)
 
     def get_action(self, dist):
-        """Make action selection function (outputs int actions, sampled from policy."""
+        """Make action selection function (outputs actions, sampled from policy)."""
         action = dist.sample()
         log_prob = dist.log_prob(action)
         return action, log_prob
-        
-    def get_value(self, obs):
-        value = self.value_net.forward(obs)
-        return value
+    
+    def get_values(self, obs, actions, dist):
+        """Make value selection function (outputs values for observations)."""
+        values = self.value_net.forward(obs)
+        log_prob = dist.log_prob(actions)
+        return values, log_prob
 
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
@@ -193,11 +199,13 @@ class PPO_PolicyGradient:
                 cum_rewards.append(cumulate_discount)
         return torch.tensor(np.array(cum_rewards))
 
-    def advantage(self, rewards, values):
+    def advantage_estimate(self, rewards, values):
         """Simplest advantage calculation"""
-        logging.info('Rewards size {}'.format(rewards.size()))
-        logging.info('Values size {}'.format(values.size()))
+        # STEP 5: compute advantage estimates A_t
         return rewards - values 
+    
+    def generalized_advantage_estimate(self):
+        pass
 
     def collect_rollout(self):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
@@ -248,10 +256,10 @@ class PPO_PolicyGradient:
                 torch.tensor(np.array(log_probs_per_batch), dtype=torch.float), \
                 rewards_to_go_per_batch, episode_lengths_per_batch
 
-    def train(self, obs, actions, rewards, advantages, log_probs):
+    def train(self, obs, rewards, advantages, action_log_probs, v_log_probs, clip):
         """Calculate loss and update weights of both networks."""
         self.policyNet_optim.zero_grad() # reset optimizer
-        policy_loss = self.policy_net.loss(obs, actions, advantages, log_probs)
+        policy_loss = self.policy_net.loss(obs, action_log_probs, v_log_probs, clip)
         policy_loss.backward()
 
         self.value_net_optim.zero_grad()
@@ -267,15 +275,18 @@ class PPO_PolicyGradient:
         logging.info(f'Updating the network...')
         timesteps_simulated = 0 # number of timesteps simulated
         while timesteps_simulated < self.total_timesteps:
-            # simulate and collect trajectories --> the following values are all per batch
-            observations, actions, log_probs, rewards2go, episode_length_per_batch = self.collect_rollout()
+            # STEP 3-4: imulate and collect trajectories --> the following values are all per batch
+            observations, actions, action_log_probs, rewards2go, episode_length_per_batch = self.collect_rollout()
             # calculate the advantage of current iteration
             values = self.value_net.forward(observations).squeeze()
-            advantages = self.advantage(rewards2go, values.detach())
+            # STEP 5: compute advantage estimates A_t
+            advantages = self.advantage_estimate(rewards2go, values.detach())
 
             for _ in range(self.updates):
-                # calculate loss and update weights
-                self.train(observations, actions, rewards2go, advantages, log_probs)
+                # STEP 6-7: calculate loss and update weights
+                dist = self.get_continuous_policy(observations)
+                values, log_probs = self.get_values(observations, actions, dist)
+                self.train(observations, rewards2go, advantages, action_log_probs, log_probs, clip=self.clip)
             
             # monitoring W&B
             wandb.log({
