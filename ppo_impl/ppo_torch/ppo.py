@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-import torch.nn.functional as F
 from torch.optim import Adam
 from  torch.distributions import multivariate_normal
 from torch.distributions import Categorical
@@ -42,6 +41,7 @@ class ValueNet(Net):
     """Setup Value Network (Critic) optimizer"""
     def __init__(self, in_dim, out_dim) -> None:
         super(ValueNet, self).__init__()
+        self.flatten=nn.Flatten()
         self.layer1 = nn.Linear(in_dim, 64)
         self.layer2 = nn.Linear(64, 64)
         self.layer3 = nn.Linear(64, out_dim)
@@ -57,34 +57,34 @@ class ValueNet(Net):
     
     def loss(self, obs, rewards):
         """Objective function defined by mean-squared error"""
-        return ((rewards - self(obs))**2).mean() # regression
+        V = self(obs).squeeze()
+        return nn.MSELoss()(V, rewards) # regression
 
 class PolicyNet(Net):
     """Setup Policy Network (Actor)"""
     def __init__(self, in_dim, out_dim) -> None:
         super(PolicyNet, self).__init__()
+        self.flatten=nn.Flatten()
         self.layer1 = nn.Linear(in_dim, 64)
         self.layer2 = nn.Linear(64, 64)
         self.layer3 = nn.Linear(64, out_dim)
-        self.relu = nn.ReLU()
-        self.softmax = nn.Softmax()
+        self.tanh = nn.Tanh()
+        self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, obs, act=None):
+    def forward(self, obs):
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float)
-        x = self.relu(self.layer1(obs))
-        x = self.relu(self.layer2(x))
+        x = self.tanh(self.layer1(obs))
+        x = self.tanh(self.layer2(x))
         out = self.softmax(self.layer3(x))
         return out
     
     def loss(self, advantages, action_log_probs, v_log_probs, clip_eps=0.2):
         """Make the clipped objective function to compute loss."""
         ratio = torch.exp(v_log_probs - action_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
-        clip_1 = torch.mul(ratio, advantages)
-        clip = torch.clamp(ratio, min=1.0 - clip_eps, max=1.0 + clip_eps)
-        clip_2 = torch.mul(clip, advantages)
-        min_val = torch.min(clip_1, clip_2)
-        policy_loss = torch.neg(min_val).mean()
+        clip_1 = ratio * advantages
+        clip_2 = torch.clamp(ratio, min=1.0 - clip_eps, max=1.0 + clip_eps) * advantages
+        policy_loss = (-torch.min(clip_1, clip_2)).mean()
         return policy_loss
 
 
@@ -107,7 +107,6 @@ class PPO_PolicyGradient:
         lr=1e-3,
         seed=42) -> None:
 
-        # TODO: Check these values --> maybe simplify
         self.env = env
         self.seed = seed
         self.gamma = gamma
@@ -159,30 +158,19 @@ class PPO_PolicyGradient:
         return action, log_prob
     
     def get_values(self, obs, actions, dist):
-        """Make value selection function (outputs values for observations)."""
+        """Make value selection function (outputs values for observations in a batch)."""
         values = self.value_net.forward(obs)
         log_prob = dist.log_prob(actions)
         return values, log_prob
 
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
-        action_dist = self.get_continuous_policy(obs)
+        action_dist = self.get_discrete_policy(obs)
         action, log_prob = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy()
 
-    def rewards_to_go(self, rewards):
-        """Calculate rewards to go to reduce the variance in the policy gradient"""
-        # Lecture 5, p. 17 UCB Causality issue: http://rail.eecs.berkeley.edu/deeprlcourse/static/slides/lec-5.pdf
-        # Open AI Documentation: https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#implementing-reward-to-go-policy-gradient
-        reward_to_go = []
-        # TODO: Fix the following is incorrect
-        for ep_rewards in reversed(rewards): # iterate over rewards per episode
-            rtgs = np.zeros_like(ep_rewards)
-            amount = len(rewards)
-            for i in reversed(range(len(ep_rewards))):
-                rtgs[i] = ep_rewards[i] + (rtgs[i+1] if i+1 < amount else 0)
-            reward_to_go.append(rtgs)
-        return torch.tensor(np.array(reward_to_go), dtype=torch.float)
+    def reward_to_go(self):
+        pass
 
     def cummulative_reward(self, rewards):
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
@@ -193,7 +181,7 @@ class PPO_PolicyGradient:
             for reward in reversed(ep_rewards):
                 cumulate_discount = reward + (self.gamma * cumulate_discount)
                 cum_rewards.append(cumulate_discount)
-        return torch.tensor(np.array(cum_rewards))
+        return torch.tensor(np.array(cum_rewards), dtype=torch.float)
 
     def advantage_estimate(self, rewards, values):
         """Simplest advantage calculation"""
@@ -266,7 +254,7 @@ class PPO_PolicyGradient:
     def learn(self):
         """"""
         # logging info 
-        logging.info('Updating the network...')
+        logging.info('Updating the neural network...')
         t_simulated = 0 # number of timesteps simulated
         while t_simulated < self.total_timesteps:
             # STEP 3-4: imulate and collect trajectories --> the following values are all per batch
@@ -278,7 +266,7 @@ class PPO_PolicyGradient:
 
             for _ in range(self.updates):
                 # STEP 6-7: calculate loss and update weights
-                dist = self.get_continuous_policy(observations)
+                dist = self.get_discrete_policy(observations)
                 values, log_probs = self.get_values(observations, actions, dist)
                 self.train(observations, rewards2go, advantages, action_log_probs, log_probs, clip=self.clip)
             
@@ -318,7 +306,7 @@ if __name__ == '__main__':
     learning_rate = 1e-3
     gamma = 0.99 
     clip = 0.2
-    env_name = 'Pendulum-v1' #'CartPole-v1' 'Pendulum-v1', 'MountainCar-v0'
+    env_name = 'CartPole-v1' #'CartPole-v1' 'Pendulum-v1', 'MountainCar-v0'
 
     # Configure logger
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -333,7 +321,7 @@ if __name__ == '__main__':
     logging.info(f'env action space: {act_shape}')
     
     obs_dim = obs_shape[0] 
-    act_dim = act_shape[0]
+    act_dim = 2 # act_shape[0]
 
     logging.info(f'env observation dim: {obs_dim}')
     logging.info(f'env action dim: {act_dim}')
