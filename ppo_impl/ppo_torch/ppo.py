@@ -163,14 +163,14 @@ class PPO_PolicyGradient:
         return action, log_prob
     
     def get_values(self, obs, actions, dist):
-        """Make value selection function (outputs values for observations in a batch)."""
+        """Make value selection function (outputs values for obs in a batch)."""
         values = self.value_net.forward(obs)
         log_prob = dist.log_prob(actions)
         return values, log_prob
 
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
-        action_dist = self.get_discrete_policy(obs)
+        action_dist = self.get_continuous_policy(obs) # self.get_discrete_policy(obs)
         action, log_prob = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy()
 
@@ -197,7 +197,7 @@ class PPO_PolicyGradient:
     def collect_rollout(self, sum_rewards, num_episodes, num_passed_timesteps):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
     
-        trajectory_observations = []
+        trajectory_obs = []
         trajectory_actions = []
         trajectory_rewards = []
         trajectory_action_probs = []
@@ -211,7 +211,7 @@ class PPO_PolicyGradient:
         for _ in range(trajectory_iterations):
             while True: 
                 # collect observation and get action with log probs
-                trajectory_observations.append(next_obs)
+                trajectory_obs.append(next_obs)
                 action, log_probability = self.step(next_obs)
 
                 # Run an episode 
@@ -246,7 +246,7 @@ class PPO_PolicyGradient:
         mean_reward = sum_rewards / num_episodes
         logging.info(f"Mean cumulative reward: {mean_reward}")
         
-        return torch.tensor(np.array(trajectory_observations), dtype=torch.float), \
+        return torch.tensor(np.array(trajectory_obs), dtype=torch.float), \
                 torch.tensor(np.array(trajectory_actions), dtype=torch.float), \
                 torch.tensor(np.array(trajectory_action_probs), dtype=torch.float), \
                 torch.tensor(np.array(trajectory_rewards), dtype=torch.float), \
@@ -274,20 +274,20 @@ class PPO_PolicyGradient:
             policy_loss, value_loss = 0, 0
             # Collect trajectory
             # STEP 3-4: imulate and collect trajectories --> the following values are all per batch
-            observations, actions, action_log_probs, rewards2go, mean_reward, num_passed_timesteps = self.collect_rollout(sum_rewards, num_episodes, num_passed_timesteps)
+            obs, actions, action_log_probs, rewards2go, mean_reward, num_passed_timesteps = self.collect_rollout(sum_rewards, num_episodes, num_passed_timesteps)
             # reset
             sum_rewards = 0
             # calculate the advantage of current iteration
-            values = self.value_net.forward(observations).squeeze()
+            values = self.value_net.forward(obs).squeeze()
             # STEP 5: compute advantage estimates A_t
             advantages = self.advantage_estimate(rewards2go, values.detach())
 
             # loop for network update
             for epoch in range(self.num_epochs):
                 # STEP 6-7: calculate loss and update weights
-                dist = self.get_discrete_policy(observations)
-                values, log_probs = self.get_values(observations, actions, dist)
-                policy_loss, value_loss = self.train(observations, rewards2go, advantages, action_log_probs, log_probs, clip=self.epsilon)
+                dist = self.get_continuous_policy(obs) # self.get_discrete_policy(obs)
+                values, log_probs = self.get_values(obs, actions, dist)
+                policy_loss, value_loss = self.train(obs, rewards2go, advantages, action_log_probs, log_probs, clip=self.epsilon)
             
             logging.info('###########################################')
             logging.info(f"Epoch: {epoch}, Policy loss: {policy_loss}")
@@ -328,8 +328,8 @@ def arg_parser():
 def make_env(env_id='Pendulum-v1', render_mode=False, seed=42):
     # TODO: Needs to be parallized for parallel simulation
     env = gym.make(env_id)
-    if render_mode:
-        env.render(mode = "human")
+    # if render_mode:
+    #     env.render(mode = "human")
     return env
 
 def train():
@@ -354,14 +354,14 @@ if __name__ == '__main__':
     learning_rate_v = 1e-3          # learning rate for value network
     gamma = 0.99                    # discount factor
     epsilon = 0.2                   # clipping factor
-    env_name = 'CartPole-v1'        # name of OpenAI gym environment
+    env_name = 'Pendulum-v1'       # name of OpenAI gym environment
     #'CartPole-v1' 'Pendulum-v1', 'MountainCar-v0'
 
     # Configure logger
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     
     env = make_env(env_name, render_mode=True)
-    # get dimensions of observations (what goes in?)
+    # get dimensions of obs (what goes in?)
     # and actions (what goes out?)
     obs_shape = env.observation_space.shape
     act_shape = env.action_space.shape
@@ -370,12 +370,12 @@ if __name__ == '__main__':
     logging.info(f'env action space: {act_shape}')
     
     obs_dim = obs_shape[0] 
-    act_dim = 2 # act_shape[0]
+    act_dim = act_shape[0] # 2 at CartPole
 
     logging.info(f'env observation dim: {obs_dim}')
     logging.info(f'env action dim: {act_dim}')
     
-    # upper and lower bound describing the values our observations can take
+    # upper and lower bound describing the values our obs can take
     logging.info(f'upper bound for env observation: {env.observation_space.high}')
     logging.info(f'lower bound for env observation: {env.observation_space.low}')
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
