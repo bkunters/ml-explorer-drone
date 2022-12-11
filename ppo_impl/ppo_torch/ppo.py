@@ -6,6 +6,7 @@ from torch.distributions import Categorical
 import numpy as np
 import datetime
 import gym
+import os
 
 # logging python
 import logging
@@ -14,7 +15,7 @@ import sys
 # monitoring/logging ML
 import wandb
 
-
+MODEL_PATH = './models/'
 ####################
 ####### TODO #######
 ####################
@@ -135,7 +136,7 @@ class PPO_PolicyGradient:
         self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic)
 
         # add optimizer for actor and critic
-        self.policyNet_optim = Adam(self.policy_net.parameters(), lr=self.lr_p) # Setup Policy Network (Actor) optimizer
+        self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p) # Setup Policy Network (Actor) optimizer
         self.value_net_optim = Adam(self.value_net.parameters(), lr=self.lr_v)  # Setup Value Network (Critic) optimizer
 
     def get_discrete_policy(self, obs):
@@ -173,9 +174,6 @@ class PPO_PolicyGradient:
         action, log_prob = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy()
 
-    def reward_to_go(self):
-        pass
-
     def cummulative_reward(self, rewards):
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
         # G(t) = R(t) + gamma * R(t-1)
@@ -206,6 +204,7 @@ class PPO_PolicyGradient:
         trajectory_values = []
 
         next_obs = self.env.reset()
+        env.render(mode='human')
         total_reward, num_batches, mean_reward = 0, 0, 0
 
         logging.info("Collecting batch trajectories...")
@@ -256,7 +255,7 @@ class PPO_PolicyGradient:
 
     def train(self, obs, rewards, advantages, action_log_probs, v_log_probs, clip):
         """Calculate loss and update weights of both networks."""
-        self.policyNet_optim.zero_grad() # reset optimizer
+        self.policy_net_optim.zero_grad() # reset optimizer
         policy_loss = self.policy_net.loss(advantages, action_log_probs, v_log_probs, clip)
         policy_loss.backward()
 
@@ -270,7 +269,7 @@ class PPO_PolicyGradient:
         """"""
         # logging info 
         logging.info('Updating the neural network...')
-        num_passed_timesteps, mean_reward, sum_rewards, num_episodes, t_simulated = 0, 0, 0, 1, 0 # number of timesteps simulated
+        num_passed_timesteps, mean_reward, sum_rewards, best_mean_reward, num_episodes, t_simulated = 0, 0, 0, 0, 1, 0 # number of timesteps simulated
         while t_simulated < self.total_timesteps:
             policy_loss, value_loss = 0, 0
             # Collect trajectory
@@ -302,6 +301,23 @@ class PPO_PolicyGradient:
                 'policy loss': policy_loss,
                 'value loss': value_loss,
                 'mean return': mean_reward})
+            
+            # store model in checkpoints
+            if mean_reward > best_mean_reward:
+                env_name = env.unwrapped.spec.id
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': self.policy_net.state_dict(),
+                    'optimizer_state_dict': self.policy_net_optim.state_dict(),
+                    'loss': policy_loss,
+                    }, f'{MODEL_PATH}{env_name}__policyNet')
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': self.value_net.state_dict(),
+                    'optimizer_state_dict': self.value_net_optim.state_dict(),
+                    'loss': policy_loss,
+                    }, f'{MODEL_PATH}{env_name}__valueNet')
+                best_mean_reward = mean_reward
 
 ####################
 ####################
@@ -309,9 +325,11 @@ class PPO_PolicyGradient:
 def arg_parser():
     pass 
 
-def make_env(env_id='Pendulum-v1', render_mode='human', seed=42):
+def make_env(env_id='Pendulum-v1', render_mode=False, seed=42):
     # TODO: Needs to be parallized for parallel simulation
     env = gym.make(env_id)
+    if render_mode:
+        env.render(mode = "human")
     return env
 
 def train():
@@ -323,6 +341,9 @@ def test():
 
 if __name__ == '__main__':
     
+    if not os.path.exists(MODEL_PATH):
+        os.makedirs(MODEL_PATH)
+
     # Hyperparameter
     unity_file_name = ''            # name of unity environment
     total_timesteps = 1000          # Total number of epochs to run the training
@@ -339,7 +360,7 @@ if __name__ == '__main__':
     # Configure logger
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     
-    env = make_env(env_name)
+    env = make_env(env_name, render_mode=True)
     # get dimensions of observations (what goes in?)
     # and actions (what goes out?)
     obs_shape = env.observation_space.shape
@@ -373,8 +394,8 @@ if __name__ == '__main__':
             'output layer size': act_dim,
             'learning rate (policyNet)': learning_rate_p,
             'learning rate (valueNet)': learning_rate_v,
-            'gamma': gamma,
-            'epsilon': epsilon    
+            'gamma (discount)': gamma,
+            'epsilon (clipping)': epsilon    
         },
     name=f"{env_name}__{current_time}",
     # monitor_gym=True,
