@@ -22,13 +22,9 @@ MODEL_PATH = './models/'
 
 # This is a TODO Section - please mark a todo as (done) if done
 # 0) Check current implementation against article: https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/
-# 1) Check code for discrete domain --> test with CartPole (adjust beforehand)
 # 2) Check code for continuous domain --> test with Pendulum
-# 3) Implement Surrogate clipping loss
 # 4) Fix calculation of Advantage
-# 5) Check hyperparameters --> check overall implementation logic
-# 6) Add checkpoints to restart model if it got interrupted
-# 7) Check monitoring on W&B --> eventually we need to change the values logged
+# 5) Check implementation of cummulative rewards
 
 ####################
 ####################
@@ -59,7 +55,7 @@ class ValueNet(Net):
     def loss(self, obs, rewards):
         """Objective function defined by mean-squared error"""
         values = self(obs).squeeze()
-        return nn.MSELoss()(values, rewards) # regression
+        return ((rewards - values)**2).mean() # MSE loss regression
 
 class PolicyNet(Net):
     """Setup Policy Network (Actor)"""
@@ -69,23 +65,22 @@ class PolicyNet(Net):
         self.layer1 = nn.Linear(in_dim, 64)
         self.layer2 = nn.Linear(64, 64)
         self.layer3 = nn.Linear(64, out_dim)
-        self.tanh = nn.Tanh()
-        self.softmax = nn.Softmax(dim=-1)
+        self.relu = nn.ReLU()
 
     def forward(self, obs):
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float)
-        x = self.tanh(self.layer1(obs))
-        x = self.tanh(self.layer2(x))
-        out = self.softmax(self.layer3(x)) # TODO: Check dim -1 correct
+        x = self.relu(self.layer1(obs))
+        x = self.relu(self.layer2(x))
+        out = self.layer3(x)
         return out
     
-    def loss(self, advantages, action_log_probs, v_log_probs, clip_eps=0.2):
+    def loss(self, advantages, a_log_probs, v_log_probs, clip_eps=0.2):
         """Make the clipped objective function to compute loss."""
-        ratio = torch.exp(v_log_probs - action_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
-        clip_1 = torch.mul(ratio, advantages)
-        clip_2 = torch.mul(torch.clamp(ratio, min=1.0 - clip_eps, max=1.0 + clip_eps), advantages)
-        policy_loss = (-torch.min(clip_1, clip_2)).mean()
+        ratio = torch.exp(v_log_probs - a_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
+        clip_1 = ratio * advantages
+        clip_2 = torch.clamp(ratio, min=1.0 - clip_eps, max=1.0 + clip_eps) * advantages
+        policy_loss = (-torch.min(clip_1, clip_2)).mean() # negative as Adam mins loss - we want to max it
         return policy_loss
 
 
@@ -178,18 +173,18 @@ class PPO_PolicyGradient:
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
         # G(t) = R(t) + gamma * R(t-1)
         cum_rewards = []
-        for ep_rewards in reversed(rewards):
-            cumulate_discount = 0
-            for reward in reversed(ep_rewards):
-                cumulate_discount = reward + (self.gamma * cumulate_discount)
-                cum_rewards.append(cumulate_discount)
+        for reward in reversed(rewards):
+            cumulate_discount = reward + (self.gamma * cumulate_discount)
+            cum_rewards.append(cumulate_discount)
         return torch.tensor(np.array(cum_rewards), dtype=torch.float)
 
-    def advantage_estimate(self, rewards, values):
+    def advantage_estimate(self, rewards, values, normalized=True):
         """Simplest advantage calculation"""
         # STEP 5: compute advantage estimates A_t
-        # TODO: eventually normalize advantage if training is instable
-        return rewards - values 
+        advantages = rewards - values
+        if normalized:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
+        return advantages
     
     def generalized_advantage_estimate(self):
         pass
@@ -222,7 +217,7 @@ class PPO_PolicyGradient:
                 
                 # STEP 3: collecting set of trajectories D_k by running action 
                 # that was sampled from policy in environment
-                next_obs, reward, done, info = self.env.step(action)
+                next_obs, reward, done, _ = self.env.step(action)
                 value = self.value_net.forward(next_obs)
 
                 total_reward += reward
@@ -253,10 +248,10 @@ class PPO_PolicyGradient:
                 mean_reward, \
                 num_passed_timesteps
 
-    def train(self, obs, rewards, advantages, action_log_probs, v_log_probs, clip):
+    def train(self, obs, rewards, advantages, a_log_probs, v_log_probs, clip):
         """Calculate loss and update weights of both networks."""
         self.policy_net_optim.zero_grad() # reset optimizer
-        policy_loss = self.policy_net.loss(advantages, action_log_probs, v_log_probs, clip)
+        policy_loss = self.policy_net.loss(advantages, a_log_probs, v_log_probs, clip)
         policy_loss.backward()
 
         self.value_net_optim.zero_grad() # resetself.env.reset() optimizer
@@ -274,7 +269,7 @@ class PPO_PolicyGradient:
             policy_loss, value_loss = 0, 0
             # Collect trajectory
             # STEP 3-4: imulate and collect trajectories --> the following values are all per batch
-            obs, actions, action_log_probs, rewards2go, mean_reward, num_passed_timesteps = self.collect_rollout(sum_rewards, num_episodes, num_passed_timesteps)
+            obs, actions, a_log_probs, rewards2go, mean_reward, num_passed_timesteps = self.collect_rollout(sum_rewards, num_episodes, num_passed_timesteps)
             # reset
             sum_rewards = 0
             # calculate the advantage of current iteration
@@ -286,21 +281,21 @@ class PPO_PolicyGradient:
             for epoch in range(self.num_epochs):
                 # STEP 6-7: calculate loss and update weights
                 dist = self.get_continuous_policy(obs) # self.get_discrete_policy(obs)
-                values, log_probs = self.get_values(obs, actions, dist)
-                policy_loss, value_loss = self.train(obs, rewards2go, advantages, action_log_probs, log_probs, clip=self.epsilon)
+                values, v_log_probs = self.get_values(obs, actions, dist)
+                policy_loss, value_loss = self.train(obs, rewards2go, advantages, a_log_probs, v_log_probs, clip=self.epsilon)
             
             logging.info('###########################################')
             logging.info(f"Epoch: {epoch}, Policy loss: {policy_loss}")
             logging.info(f"Epoch: {epoch}, Value loss: {value_loss}")
             logging.info(f"Total time steps: {num_passed_timesteps}")
-            logging.info('###########################################')
+            logging.info('###########################################\n')
             
             # logging for monitoring in W&B
             wandb.log({
                 'time steps': num_passed_timesteps,
                 'policy loss': policy_loss,
                 'value loss': value_loss,
-                'mean return': mean_reward})
+                'mean reward': mean_reward})
             
             # store model in checkpoints
             if mean_reward > best_mean_reward:
@@ -328,8 +323,6 @@ def arg_parser():
 def make_env(env_id='Pendulum-v1', render_mode=False, seed=42):
     # TODO: Needs to be parallized for parallel simulation
     env = gym.make(env_id)
-    # if render_mode:
-    #     env.render(mode = "human")
     return env
 
 def train():
@@ -382,7 +375,7 @@ if __name__ == '__main__':
    
     # Monitoring with W&B
     wandb.init(
-    project=f'drone-mechanics-ppo',
+    project=f'drone-mechanics-ppo-OpenAIGym',
     entity='drone-mechanics',
     sync_tensorboard=True,
     config={ # stores hyperparams in job
