@@ -82,8 +82,8 @@ class PolicyNet(Net):
     def loss(self, advantages, action_log_probs, v_log_probs, clip_eps=0.2):
         """Make the clipped objective function to compute loss."""
         ratio = torch.exp(v_log_probs - action_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
-        clip_1 = ratio * advantages
-        clip_2 = torch.clamp(ratio, min=1.0 - clip_eps, max=1.0 + clip_eps) * advantages
+        clip_1 = torch.mul(ratio, advantages)
+        clip_2 = torch.mul(torch.clamp(ratio, min=1.0 - clip_eps, max=1.0 + clip_eps), advantages)
         policy_loss = (-torch.min(clip_1, clip_2)).mean()
         return policy_loss
 
@@ -206,7 +206,7 @@ class PPO_PolicyGradient:
             # track rewards per episode
             rewards_per_episode = []
             # reset environment for new episode
-            next_obs = self.env.reset() 
+            next_obs, info = env.reset()
             done = False 
 
             for episode in range(self.timesteps_per_episode):
@@ -217,7 +217,7 @@ class PPO_PolicyGradient:
                 
                 # STEP 3: collecting set of trajectories D_k by running action 
                 # that was sampled from policy in environment
-                next_obs, reward, done, truncated = self.env.step(action)
+                next_obs, reward, done, truncated, info = self.env.step(action)
 
                 # tracking of values
                 actions_per_batch.append(action)
@@ -283,9 +283,9 @@ class PPO_PolicyGradient:
 def arg_parser():
     pass 
 
-def make_env(env_id='Pendulum-v1', seed=42):
+def make_env(env_id='Pendulum-v1', render_mode='human', seed=42):
     # TODO: Needs to be parallized for parallel simulation
-    env = gym.make(env_id)
+    env = gym.make(env_id, render_mode=render_mode)
     return env
 
 def train():
