@@ -2,11 +2,15 @@ import torch
 from torch import nn
 from torch.optim import Adam
 from  torch.distributions import multivariate_normal
+from torch.distributions.normal import Normal
 from torch.distributions import Categorical
+from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import datetime
 import gym
 import os
+
+import argparse
 
 # logging python
 import logging
@@ -39,9 +43,9 @@ class ValueNet(Net):
     def __init__(self, in_dim, out_dim) -> None:
         super(ValueNet, self).__init__()
         self.flatten=nn.Flatten()
-        self.layer1 = nn.Linear(in_dim, 64)
-        self.layer2 = nn.Linear(64, 64)
-        self.layer3 = nn.Linear(64, out_dim)
+        self.layer1 = layer_init(nn.Linear(in_dim, 64))
+        self.layer2 = layer_init(nn.Linear(64, 64))
+        self.layer3 = layer_init(nn.Linear(64, out_dim))
         self.relu = nn.ReLU()
     
     def forward(self, obs):
@@ -62,9 +66,9 @@ class PolicyNet(Net):
     def __init__(self, in_dim, out_dim) -> None:
         super(PolicyNet, self).__init__()
         self.flatten=nn.Flatten()
-        self.layer1 = nn.Linear(in_dim, 64)
-        self.layer2 = nn.Linear(64, 64)
-        self.layer3 = nn.Linear(64, out_dim)
+        self.layer1 = layer_init(nn.Linear(in_dim, 64))
+        self.layer2 = layer_init(nn.Linear(64, 64))
+        self.layer3 = layer_init(nn.Linear(64, out_dim))
         self.relu = nn.ReLU()
 
     def forward(self, obs):
@@ -76,7 +80,7 @@ class PolicyNet(Net):
         return out
     
     def loss(self, advantages, a_log_probs, v_log_probs, clip_eps=0.2):
-        """Make the clipped objective function to compute loss."""
+        """Make the clipped surrogate objective function to compute policy loss."""
         ratio = torch.exp(v_log_probs - a_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
         clip_1 = ratio * advantages
         clip_2 = torch.clamp(ratio, min=1.0 - clip_eps, max=1.0 + clip_eps) * advantages
@@ -102,7 +106,7 @@ class PPO_PolicyGradient:
         lr_v=1e-3,
         gamma=0.99,
         epsilon=0.22,
-        seed=42) -> None:
+        adam_eps=1e-5) -> None:
         
         # hyperparams
         self.in_dim = in_dim
@@ -116,29 +120,22 @@ class PPO_PolicyGradient:
         self.gamma = gamma
         self.epsilon = epsilon
 
-        # env + seeding
+        # environment
         self.env = env
-        self.seed = seed
-
-        # seed torch, numpy and gym
-        self.env.action_space.seed(seed)
-        self.env.observation_space.seed(seed)
-        torch.manual_seed(seed)
-        np.random.seed(seed)
 
         # add net for actor and critic
         self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor)
         self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic)
 
         # add optimizer for actor and critic
-        self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p) # Setup Policy Network (Actor) optimizer
-        self.value_net_optim = Adam(self.value_net.parameters(), lr=self.lr_v)  # Setup Value Network (Critic) optimizer
+        self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p, eps=adam_eps) # Setup Policy Network (Actor) optimizer
+        self.value_net_optim = Adam(self.value_net.parameters(), lr=self.lr_v, eps=adam_eps)  # Setup Value Network (Critic) optimizer
 
     def get_discrete_policy(self, obs):
         """Make function to compute action distribution in discrete action space."""
         # 2) Use Categorial distribution for discrete space
         # https://pytorch.org/docs/stable/distributions.html
-        action_prob = self.policy_net.forward(obs) # query Policy Network (Actor) for mean action
+        action_prob = self.policy_net(obs) # query Policy Network (Actor) for mean action
         return Categorical(logits=action_prob)
 
     def get_continuous_policy(self, obs):
@@ -147,7 +144,7 @@ class PPO_PolicyGradient:
         # fixes the detection of outliers, allows to capture correlation between features
         # https://discuss.pytorch.org/t/understanding-log-prob-for-normal-distribution-in-pytorch/73809
         # 1) Use Normal distribution for continuous space
-        action_prob = self.policy_net.forward(obs) # query Policy Network (Actor) for mean action
+        action_prob = self.policy_net(obs) # query Policy Network (Actor) for mean action
         cov_matrix = torch.diag(torch.full(size=(self.out_dim,), fill_value=0.5))
         return multivariate_normal.MultivariateNormal(action_prob, covariance_matrix=cov_matrix)
 
@@ -159,7 +156,7 @@ class PPO_PolicyGradient:
     
     def get_values(self, obs, actions, dist):
         """Make value selection function (outputs values for obs in a batch)."""
-        values = self.value_net.forward(obs)
+        values = self.value_net(obs)
         log_prob = dist.log_prob(actions)
         return values, log_prob
 
@@ -218,7 +215,7 @@ class PPO_PolicyGradient:
                 # STEP 3: collecting set of trajectories D_k by running action 
                 # that was sampled from policy in environment
                 next_obs, reward, done, _ = self.env.step(action)
-                value = self.value_net.forward(next_obs)
+                value = self.value_net(next_obs)
 
                 total_reward += reward
                 sum_rewards += reward
@@ -273,7 +270,7 @@ class PPO_PolicyGradient:
             # reset
             sum_rewards = 0
             # calculate the advantage of current iteration
-            values = self.value_net.forward(obs).squeeze()
+            values = self.value_net(obs).squeeze()
             # STEP 5: compute advantage estimates A_t
             advantages = self.advantage_estimate(rewards2go, values.detach())
 
@@ -318,12 +315,26 @@ class PPO_PolicyGradient:
 ####################
 
 def arg_parser():
-    pass 
+    parser = argparse.ArgumentParser()
 
-def make_env(env_id='Pendulum-v1', render_mode=False, seed=42):
+def make_env(env_id='Pendulum-v1', seed=42):
     # TODO: Needs to be parallized for parallel simulation
     env = gym.make(env_id)
+    # seed env for reproducability
+    env.seed(seed)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
     return env
+
+def make_vec_env(num_env=1):
+    """Create a vectorized environment for parallelized training."""
+    pass
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    """Initialize the hidden layers with orthogonal initialization"""
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
 
 def train():
     # TODO Add Checkpoints to load model 
@@ -346,14 +357,21 @@ if __name__ == '__main__':
     learning_rate_p = 1e-3          # learning rate for policy network
     learning_rate_v = 1e-3          # learning rate for value network
     gamma = 0.99                    # discount factor
+    adam_epsilon = 1e-5             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8
     epsilon = 0.2                   # clipping factor
-    env_name = 'Pendulum-v1'       # name of OpenAI gym environment
+    env_name = 'Pendulum-v1'        # name of OpenAI gym environment
+    seed = 42                       # seed gym, env, torch, numpy 
     #'CartPole-v1' 'Pendulum-v1', 'MountainCar-v0'
 
     # Configure logger
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     
-    env = make_env(env_name, render_mode=True)
+    # seed gym, torch and numpy
+    env = make_env(env_name, seed=seed)
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
     # get dimensions of obs (what goes in?)
     # and actions (what goes out?)
     obs_shape = env.observation_space.shape
@@ -385,10 +403,11 @@ if __name__ == '__main__':
             'number of epochs for update': num_epochs,
             'input layer size': obs_dim,
             'output layer size': act_dim,
-            'learning rate (policyNet)': learning_rate_p,
-            'learning rate (valueNet)': learning_rate_v,
+            'learning rate (policy net)': learning_rate_p,
+            'learning rate (value net)': learning_rate_v,
+            'epsilon (adam optimizer)': adam_epsilon,
             'gamma (discount)': gamma,
-            'epsilon (clipping)': epsilon    
+            'epsilon (clipping)': epsilon
         },
     name=f"{env_name}__{current_time}",
     # monitor_gym=True,
@@ -406,7 +425,8 @@ if __name__ == '__main__':
                 lr_p=learning_rate_p,
                 lr_v=learning_rate_v,
                 gamma=gamma,
-                epsilon=epsilon)
+                epsilon=epsilon,
+                adam_eps=adam_epsilon)
     
     # run training
     agent.learn()
