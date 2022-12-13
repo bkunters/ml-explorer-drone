@@ -49,7 +49,7 @@ while True:
     # TODO: Track the value in W&B (ppo_tf.py is already implemented) @Ardian
     # TODO: What is the maximum reward we can reach --> 500 
 
-    # Log into tensorboard & Wandb
+    # Log into Wandb
     # wandb.log({
     #     'step': num_episodes,
     #     'timesteps': num_passed_timesteps,
