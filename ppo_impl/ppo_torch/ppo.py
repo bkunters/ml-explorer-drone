@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.optim import Adam
 from torch.distributions import MultivariateNormal
 from torch.distributions import Categorical
@@ -42,7 +43,6 @@ class ValueNet(Net):
     """Setup Value Network (Critic) optimizer"""
     def __init__(self, in_dim, out_dim) -> None:
         super(ValueNet, self).__init__()
-        self.flatten=nn.Flatten()
         self.layer1 = layer_init(nn.Linear(in_dim, 64))
         self.layer2 = layer_init(nn.Linear(64, 64))
         self.layer3 = layer_init(nn.Linear(64, out_dim), std=1.0)
@@ -53,31 +53,30 @@ class ValueNet(Net):
             obs = torch.tensor(obs, dtype=torch.float)
         x = self.relu(self.layer1(obs))
         x = self.relu(self.layer2(x))
-        out = self.layer3(x)
+        out = self.layer3(x) # linear
         return out
     
     def loss(self, obs, rewards):
         """Objective function defined by mean-squared error"""
         values = self(obs).squeeze()
-        # return 0.5 * ((rewards - values)**2).mean() # MSE loss
+        #return 0.5 * ((rewards - values)**2).mean() # MSE loss
         return nn.MSELoss()(values, rewards)
 
 class PolicyNet(Net):
     """Setup Policy Network (Actor)"""
     def __init__(self, in_dim, out_dim) -> None:
         super(PolicyNet, self).__init__()
-        self.flatten=nn.Flatten()
         self.layer1 = layer_init(nn.Linear(in_dim, 64))
         self.layer2 = layer_init(nn.Linear(64, 64))
         self.layer3 = layer_init(nn.Linear(64, out_dim), std=0.01)
-        self.relu = nn.ReLU()
+        self.tanh = nn.Tanh()
 
     def forward(self, obs):
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float)
-        x = self.relu(self.layer1(obs))
-        x = self.relu(self.layer2(x))
-        out = self.layer3(x)
+        x = self.tanh(self.layer1(obs))
+        x = self.tanh(self.layer2(x))
+        out = self.layer3(x) # linear if action space is continuous - sofmax with discrete
         return out
     
     def loss(self, advantages, batch_log_probs, curr_log_probs, clip_eps=0.2):
@@ -199,7 +198,6 @@ class PPO_PolicyGradient:
         trajectory_action_probs = []
         trajectory_rewards = []
         trajectory_rewards_to_go = []
-        trajectory_values = []
 
         next_obs = self.env.reset()
         total_reward, num_batches, mean_reward = 0, 0, 0
@@ -225,7 +223,6 @@ class PPO_PolicyGradient:
                 # STEP 3: collecting set of trajectories D_k by running action 
                 # that was sampled from policy in environment
                 next_obs, reward, done, info = self.env.step(action)
-                value = self.value_net(next_obs)
 
                 total_reward += reward
                 sum_rewards += reward
@@ -234,7 +231,6 @@ class PPO_PolicyGradient:
                 trajectory_actions.append(action)
                 trajectory_action_probs.append(log_probability)
                 trajectory_rewards.append(reward)
-                trajectory_values.append(value)
                 
                 # break out of loop if episode is terminated
                 if done:
