@@ -1,0 +1,60 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.13.5
+    code_path: code/ppo_impl/ppo_tf/ppo_tf.py
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    python_version: 3.9.15
+    start_time: 1670967384.979869
+    t:
+      1:
+      - 1
+      - 2
+      - 3
+      - 55
+      2:
+      - 1
+      - 2
+      - 3
+      - 55
+      3:
+      - 13
+      - 16
+      - 23
+      - 35
+      4: 3.9.15
+      5: 0.13.5
+      8:
+      - 4
+      - 5
+batches per episode:
+  desc: null
+  value: 10
+discount:
+  desc: null
+  value: 0.99
+epsilon:
+  desc: null
+  value: 0.2
+input layer size:
+  desc: null
+  value: 4
+lr policyNet:
+  desc: null
+  value: 0.001
+lr valueNet:
+  desc: null
+  value: 0.001
+output layer size:
+  desc: null
+  value: 2
+total epochs:
+  desc: null
+  value: 5
+total steps:
+  desc: null
+  value: 1000

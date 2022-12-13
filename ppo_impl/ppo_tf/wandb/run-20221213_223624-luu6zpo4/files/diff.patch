@@ -1,0 +1,625 @@
+diff --git a/.gitignore b/.gitignore
+index 97b6c12..5755415 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -36,5 +36,5 @@ Assets/ML-Agents/Timers/
+ sysinfo.txt
+ 
+ # Monitoring
+-wandb/*
++*/wandb/*
+ ppo_impl/ppo_torch/wandb/*
+diff --git a/ppo_impl/CartPole-v1_policy_model/keras_metadata.pb b/ppo_impl/CartPole-v1_policy_model/keras_metadata.pb
+deleted file mode 100644
+index 88d4a1f..0000000
+--- a/ppo_impl/CartPole-v1_policy_model/keras_metadata.pb
++++ /dev/null
+@@ -1,2 +0,0 @@
+-
+-root"_tf_keras_model*á{"name": "policy_network", "trainable": true, "expects_training_arg": false, "dtype": "float32", "batch_input_shape": null, "must_restore_from_config": false, "preserve_input_structure_in_config": false, "autocast": true, "class_name": "PolicyNetwork", "config": {}, "shared_object_id": 0, "build_input_shape": {"class_name": "TensorShape", "items": [1, 4]}, "is_graph_network": false, "full_save_spec": {"class_name": "__tuple__", "items": [[{"class_name": "TypeSpec", "type_spec": "tf.TensorSpec", "serialized": [{"class_name": "TensorShape", "items": [1, 4]}, "float32", "input_1"]}], {}]}, "save_spec": {"class_name": "TypeSpec", "type_spec": "tf.TensorSpec", "serialized": [{"class_name": "TensorShape", "items": [1, 4]}, "float32", "input_1"]}, "keras_version": "2.10.0", "backend": "tensorflow", "model_config": {"class_name": "PolicyNetwork", "config": {}}}2
+\ No newline at end of file
+diff --git a/ppo_impl/CartPole-v1_policy_model/saved_model.pb b/ppo_impl/CartPole-v1_policy_model/saved_model.pb
+deleted file mode 100644
+index 6c6489a..0000000
+Binary files a/ppo_impl/CartPole-v1_policy_model/saved_model.pb and /dev/null differ
+diff --git a/ppo_impl/CartPole-v1_policy_model/variables/variables.data-00000-of-00001 b/ppo_impl/CartPole-v1_policy_model/variables/variables.data-00000-of-00001
+deleted file mode 100644
+index 82cd001..0000000
+Binary files a/ppo_impl/CartPole-v1_policy_model/variables/variables.data-00000-of-00001 and /dev/null differ
+diff --git a/ppo_impl/CartPole-v1_policy_model/variables/variables.index b/ppo_impl/CartPole-v1_policy_model/variables/variables.index
+deleted file mode 100644
+index 4c84161..0000000
+Binary files a/ppo_impl/CartPole-v1_policy_model/variables/variables.index and /dev/null differ
+diff --git a/ppo_impl/CartPole-v1_value_model/keras_metadata.pb b/ppo_impl/CartPole-v1_value_model/keras_metadata.pb
+deleted file mode 100644
+index d0a1e04..0000000
+--- a/ppo_impl/CartPole-v1_value_model/keras_metadata.pb
++++ /dev/null
+@@ -1,2 +0,0 @@
+-
+-þroot"_tf_keras_model*Þ{"name": "value_network", "trainable": true, "expects_training_arg": false, "dtype": "float32", "batch_input_shape": null, "must_restore_from_config": false, "preserve_input_structure_in_config": false, "autocast": true, "class_name": "ValueNetwork", "config": {}, "shared_object_id": 0, "build_input_shape": {"class_name": "TensorShape", "items": [1, 4]}, "is_graph_network": false, "full_save_spec": {"class_name": "__tuple__", "items": [[{"class_name": "TypeSpec", "type_spec": "tf.TensorSpec", "serialized": [{"class_name": "TensorShape", "items": [1, 4]}, "float32", "input_1"]}], {}]}, "save_spec": {"class_name": "TypeSpec", "type_spec": "tf.TensorSpec", "serialized": [{"class_name": "TensorShape", "items": [1, 4]}, "float32", "input_1"]}, "keras_version": "2.10.0", "backend": "tensorflow", "model_config": {"class_name": "ValueNetwork", "config": {}}}2
+\ No newline at end of file
+diff --git a/ppo_impl/CartPole-v1_value_model/saved_model.pb b/ppo_impl/CartPole-v1_value_model/saved_model.pb
+deleted file mode 100644
+index 2fba331..0000000
+Binary files a/ppo_impl/CartPole-v1_value_model/saved_model.pb and /dev/null differ
+diff --git a/ppo_impl/CartPole-v1_value_model/variables/variables.data-00000-of-00001 b/ppo_impl/CartPole-v1_value_model/variables/variables.data-00000-of-00001
+deleted file mode 100644
+index 63fdf64..0000000
+Binary files a/ppo_impl/CartPole-v1_value_model/variables/variables.data-00000-of-00001 and /dev/null differ
+diff --git a/ppo_impl/CartPole-v1_value_model/variables/variables.index b/ppo_impl/CartPole-v1_value_model/variables/variables.index
+deleted file mode 100644
+index 98c537b..0000000
+Binary files a/ppo_impl/CartPole-v1_value_model/variables/variables.index and /dev/null differ
+diff --git a/ppo_impl/ppo_cartpole.zip b/ppo_impl/ppo_cartpole.zip
+deleted file mode 100644
+index b7d7647..0000000
+Binary files a/ppo_impl/ppo_cartpole.zip and /dev/null differ
+diff --git a/ppo_impl/ppo_pendulum.zip b/ppo_impl/ppo_pendulum.zip
+deleted file mode 100644
+index 5ef23d1..0000000
+Binary files a/ppo_impl/ppo_pendulum.zip and /dev/null differ
+diff --git a/ppo_impl/ppo_stable.py b/ppo_impl/ppo_stable.py
+deleted file mode 100644
+index 151d291..0000000
+--- a/ppo_impl/ppo_stable.py
++++ /dev/null
+@@ -1,59 +0,0 @@
+-import gym
+-
+-# requires gym==0.21.0 & pyglet==1.5.27
+-from stable_baselines3 import PPO
+-from stable_baselines3.common.env_util import make_vec_env
+-
+-
+-# TODO: Hyperparameters should be the same in baseline and our own implementation
+-
+-# # Parameters
+-# num_total_steps = 25e3           # Total number of time steps to run the training
+-# learning_rate_policy = 1e-3     # Learning rate for optimizing the neural networks
+-# learning_rate_value = 1e-3
+-# num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
+-# epsilon = 0.2                   # Epsilon value in the PPO algorithm
+-# max_trajectory_size = 10000     # max number of trajectory samples to be sampled per time step. 
+-# trajectory_iterations = 16      # number of batches of episodes
+-# input_length_net = 4            # input layer size
+-# policy_output_size = 2          # policy output layer size
+-# discount_factor = 0.99
+-env_name = "Pendulum-v1"          # LunarLander-v2 or MountainCar-v0 or CartPole-v1 or Pendulum-v1
+-n_envs = 1                        # amount of envs used simultaneously
+-
+-# Parallel environments
+-env = make_vec_env(env_name, n_envs=n_envs) # TODO: @Ardian Check stable_baseline3 library 
+-
+-# Instantiate the agent
+-model = PPO(
+-    "MlpPolicy",
+-    env,
+-    gamma=0.98,
+-    # Using https://proceedings.mlr.press/v164/raffin22a.html
+-    use_sde=True,
+-    sde_sample_freq=4,
+-    learning_rate=1e-3,
+-    verbose=1,
+-)
+-
+-# Train the agent
+-model.learn(total_timesteps=int(1e5))
+-
+-obs = env.reset()
+-while True:
+-    action, _states = model.predict(obs)
+-    obs, rewards, dones, info = env.step(action)
+-    env.render()
+-
+-    # TODO: Define values to track --> look into PPO
+-    # TODO: Track the value in W&B (ppo_tf.py is already implemented) @Ardian
+-    # TODO: What is the maximum reward we can reach --> 500 
+-
+-    # Log into Wandb
+-    # wandb.log({
+-    #     'step': num_episodes,
+-    #     'timesteps': num_passed_timesteps,
+-    #     'policy loss': policy_loss, 
+-    #     'value loss': value_loss, 
+-    #     'mean reward': mean_return, 
+-    #     'sum rewards': sum_rewards})
+\ No newline at end of file
+diff --git a/ppo_impl/ppo_tf.py b/ppo_impl/ppo_tf.py
+deleted file mode 100644
+index d1de468..0000000
+--- a/ppo_impl/ppo_tf.py
++++ /dev/null
+@@ -1,296 +0,0 @@
+-import datetime
+-import tensorflow as tf
+-from tensorflow.python.keras.layers import Dense, Flatten
+-import tensorflow_probability as tfp
+-import numpy as np
+-# from mlagents_envs.environment import UnityEnvironment
+-import gym # requires gym==0.26.0
+-import wandb
+-
+-tfd = tfp.distributions
+-#
+-#
+-#
+-#
+-#
+-#
+-#
+-
+-# Parameters
+-unity_file_name = ""            # Unity environment name
+-num_total_steps = 1000           # Total number of epochs to run the training
+-learning_rate_policy = 1e-3     # Learning rate for optimizing the neural networks
+-learning_rate_value = 1e-3
+-num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
+-epsilon = 0.2                   # Epsilon value in the PPO algorithm
+-max_trajectory_size = 10000     # max number of trajectory samples to be sampled per time step. 
+-trajectory_iterations = 10      # number of batches of episodes
+-input_length_net = 4            # input layer size
+-policy_output_size = 2          # policy output layer size
+-discount_factor = 0.99
+-env_name = "CartPole-v1"        # LunarLander-v2 or MountainCar-v0 or CartPole-v1
+-
+-print(f"Tensorflow version: {tf.__version__}")
+-
+-#
+-#
+-#
+-#
+-#
+-#
+-#
+-
+-# Define the policy network
+-class PolicyNetwork(tf.keras.Model):
+-    def __init__(self, *args, **kwargs):
+-        super().__init__(*args, **kwargs)
+-        self.flatten = Flatten()
+-        self.dense1 = Dense(units=input_length_net, activation='tanh')
+-        self.dense2 = Dense(units=64, activation='tanh')
+-        self.dense3 = Dense(units=64, activation='tanh')
+-        self.out = Dense(units=policy_output_size, activation='softmax') # 'linear' if the action space is continous
+-
+-    def call(self, x):
+-        x = self.dense1(x)
+-        x = self.dense2(x)
+-        x = self.dense3(x)
+-        return self.out(x)
+-
+-# Define the value network
+-class ValueNetwork(tf.keras.Model):
+-    def __init__(self, *args, **kwargs):
+-        super().__init__(*args, **kwargs)
+-        self.flatten = Flatten()
+-        self.dense1 = Dense(units=input_length_net, activation='relu')
+-        self.dense2 = Dense(units=64, activation='relu')
+-        self.dense3 = Dense(units=64, activation='relu')
+-        self.out = Dense(units=1, activation='linear')
+-
+-    def call(self, x):
+-        x = self.dense1(x)
+-        x = self.dense2(x)
+-        x = self.dense3(x)
+-        return self.out(x)
+-
+-#
+-#
+-#
+-#
+-#
+-#
+-#
+-
+-# Setup the actor/critic networks
+-policy_net = PolicyNetwork()
+-value_net = ValueNetwork()
+-
+-#
+-#
+-#
+-#
+-#
+-#
+-#
+-
+-# This is a non-blocking call that only loads the environment.
+-#env = UnityEnvironment(file_name=unity_file_name, seed=42, side_channels=[])
+-# Start interacting with the environment.a
+-#env.reset()
+-#behavior_names = env.behavior_specs.keys()
+-
+-#
+-#
+-#
+-#
+-#
+-#
+-#
+-
+-# Setup training properties
+-policy_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_policy)
+-value_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_value)
+-
+-env = gym.make(env_name, render_mode='human')
+-env.observation_space.seed(42)
+-observation, info = env.reset(seed=42)
+-print(f"Observation space shape: {env.observation_space.shape}")
+-print(f"Action space shape: {env.action_space.shape}")
+-print(env.action_space)
+-
+-#
+-#
+-#
+-#
+-#
+-#
+-#
+-
+-# Training loop
+-current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+-# logging
+-train_log_dir = f'logs/gradient_tape/{env_name}' + current_time + '/train'
+-train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+-wandb.init(
+-    project=f'drone-mechanics-ppo',
+-    entity='drone-mechanics',
+-    sync_tensorboard=True,
+-    config={ # stores hyperparams in job
+-            'total epochs': num_epochs,
+-            'total steps': num_total_steps,
+-            'batches per episode': trajectory_iterations,
+-            'input layer size': input_length_net,
+-            'output layer size': policy_output_size,
+-            'lr policyNet': learning_rate_policy,
+-            'lr valueNet': learning_rate_value,
+-            'epsilon': epsilon,
+-            'discount': discount_factor
+-    },
+-    name=f"{env_name}__{current_time}",
+-    # monitor_gym=True,
+-    save_code=True,
+-)
+-
+-num_passed_timesteps = 0
+-sum_rewards = 0
+-num_episodes = 1
+-last_mean_reward = 0
+-for epochs in range(num_total_steps):
+-
+-    episodes = []
+-
+-    trajectory_observations = []
+-    trajectory_rewards = []
+-    trajectory_action_probs = []
+-    trajectory_advantages = np.array([])
+-    trajectory_actions = []
+-    values = []
+-    total_reward = 0
+-    total_value = 0
+-    observation, info = env.reset()
+-
+-    # Collect trajectory
+-    total_reward = 0
+-    num_batches = 0
+-    mean_return = 0
+-    batch = 0
+-
+-    print("Collecting batch trajectories...")
+-    for iter in range(trajectory_iterations):
+-        while True:
+-
+-            batch = 0
+-            trajectory_observations.append(observation)
+-
+-            num_batches += 1
+-
+-            current_action_prob = policy_net(observation.reshape(1,input_length_net))
+-            current_action_dist = tfd.Categorical(probs=current_action_prob)
+-            current_action = current_action_dist.sample(seed=42).numpy()[0]
+-            trajectory_actions.append(current_action)
+-
+-            # Sample new state etc. from environment
+-            observation, reward, terminated, truncated, info = env.step(current_action)
+-            num_passed_timesteps += 1
+-            sum_rewards += reward
+-            total_reward += reward
+-
+-            # Collect trajectory sample
+-            trajectory_rewards.append(reward)
+-            trajectory_action_probs.append(current_action_dist.prob(current_action))
+-
+-            value = value_net(observation.reshape((1,input_length_net)))
+-            values.append(value)
+-
+-            batch += 1
+-                
+-            if terminated or truncated:
+-                observation, info = env.reset()
+-
+-                # Compute advantages at the end of the episode
+-                new_adv = np.array(total_reward, dtype=np.float32) - np.array(values, dtype=np.float32)
+-                new_adv = np.squeeze(new_adv)
+-                trajectory_advantages = np.append(trajectory_advantages, new_adv)
+-                trajectory_advantages = trajectory_advantages.flatten()
+-
+-                num_episodes += 1
+-                batch = 0
+-                total_reward = 0
+-                values = []
+-                break
+-
+-    mean_return = sum_rewards / num_episodes
+-    sum_rewards = 0
+-    print(f"Mean cumulative reward: {mean_return}", flush=True)
+-
+-    trajectory_observations  = tf.constant(np.array(trajectory_observations), dtype=tf.float32)
+-    trajectory_action_probs  = tf.squeeze(tf.constant(np.array(trajectory_action_probs), dtype=tf.float32))
+-    trajectory_rewards       = tf.constant(np.array(trajectory_rewards), dtype=tf.float32)
+-    trajectory_advantages    = tf.constant(trajectory_advantages, dtype=tf.float32)
+-    trajectory_advantages    = tf.squeeze(trajectory_advantages)
+-    trajectory_advantages    = (trajectory_advantages - np.mean(trajectory_advantages)) / (np.std(trajectory_advantages) + 1e-8)
+-
+-    # Update the network loop
+-    print("Updating the neural networks...")
+-    for epoch in range(num_epochs):
+-
+-        with tf.GradientTape() as policy_tape:
+-            policy_dist             = policy_net(trajectory_observations)
+-            #policy_action_prob      = tf.experimental.numpy.max(policy_dist[:, :], axis=1)
+-            dist                    = tfd.Categorical(probs=policy_dist)
+-            policy_action_prob      = dist.prob(trajectory_actions)
+-            
+-            # Policy loss update
+-            ratios                  = tf.divide(policy_action_prob, trajectory_action_probs)
+-            clip_1                  = tf.multiply(ratios, trajectory_advantages)
+-            clip                    = tf.clip_by_value(ratios, 1.0 - epsilon, 1.0 + epsilon)
+-            clip_2                  = tf.multiply(clip, trajectory_advantages)
+-            min                     = tf.minimum(clip_1, clip_2)
+-            policy_loss             = tf.math.negative(tf.reduce_mean(min))
+-
+-        policy_gradients = policy_tape.gradient(policy_loss, policy_net.trainable_variables)
+-        policy_optimizer.apply_gradients(zip(policy_gradients, policy_net.trainable_variables))
+-
+-        with tf.GradientTape() as value_tape:
+-            value_out  = tf.squeeze(value_net(trajectory_observations))
+-            # Value loss update
+-            value_loss = tf.keras.losses.MSE(value_out, trajectory_advantages)
+-            
+-        value_gradients = value_tape.gradient(value_loss, value_net.trainable_variables)
+-        value_optimizer.apply_gradients(zip(value_gradients, value_net.trainable_variables))
+-
+-    print(f"Epoch: {epoch}, Policy loss: {policy_loss}", flush=True)
+-    print(f"Epoch: {epoch}, Value loss: {value_loss}", flush=True)
+-    print(f"Total time steps: {num_passed_timesteps}", flush=True)
+-
+-    # Make sure the best model is saved.
+-    if mean_return > last_mean_reward:
+-        # Save the policy and value networks for further training/tests
+-        policy_net.save(f"{env_name}_policy_model")
+-        value_net.save(f"{env_name}_value_model")
+-        last_mean_reward = mean_return
+-
+-    # Log into tensorboard & Wandb
+-    wandb.log({
+-        'time steps': num_passed_timesteps, 
+-        'policy loss': policy_loss, 
+-        'value loss': value_loss, 
+-        'mean return': mean_return})
+-
+-    with train_summary_writer.as_default():
+-        tf.summary.scalar('policy loss', policy_loss, step=num_episodes)
+-        tf.summary.scalar('value loss', value_loss, step=num_episodes)
+-        tf.summary.scalar('mean return', mean_return, step=num_episodes)
+-   
+-env.close()
+-wandb.run.finish() if wandb and wandb.run else None
+-#
+-#
+-#
+-#
+-#
+-#
+-#
+-
+-# Save the policy and value networks for further training/tests
+-policy_net.save(f"{env_name}_policy_model_{num_passed_timesteps}")
+-value_net.save(f"{env_name}_value_model_{num_passed_timesteps}")
+\ No newline at end of file
+diff --git a/ppo_impl/ppo_tf_test.py b/ppo_impl/ppo_tf_test.py
+deleted file mode 100644
+index 28d57ea..0000000
+--- a/ppo_impl/ppo_tf_test.py
++++ /dev/null
+@@ -1,54 +0,0 @@
+-import tensorflow as tf
+-from tensorflow.python.keras.layers import Dense, Flatten
+-import tensorflow_probability as tfp
+-import numpy as np
+-from mlagents_envs.environment import UnityEnvironment
+-import gym
+-import os
+-from matplotlib import animation
+-import matplotlib.pyplot as plt
+-
+-env_name = "CartPole-v1"
+-test_epochs = 1
+-input_length_net = 4
+-
+-env = gym.make(env_name, render_mode="rgb_array")
+-observation, info = env.reset()
+-
+-# Load models
+-policy_model = tf.keras.models.load_model(f"{env_name}_policy_model")
+-
+-total_reward = 0
+-frames = []
+-for i in range(test_epochs):
+-    while True:
+-        current_action_prob = policy_model(observation.reshape(1,input_length_net))
+-        current_action = np.argmax(current_action_prob.numpy())
+-
+-        frames.append(env.render())
+-        observation, reward, terminated, truncated, info = env.step(current_action)
+-        total_reward += reward
+-
+-        if terminated or truncated:
+-            observation, info = env.reset()
+-            break
+-    
+-        
+-
+-print(f"mean cumulative award per episode: {total_reward / test_epochs}")
+-
+-def save_frames_as_gif(frames, path='./', filename=f'{env_name}_animation.gif'):
+-
+-    #Mess with this to change frame size
+-    plt.figure(figsize=(frames[0].shape[1] / 72.0, frames[0].shape[0] / 72.0), dpi=72)
+-
+-    patch = plt.imshow(frames[0])
+-    plt.axis('off')
+-
+-    def animate(i):
+-        patch.set_data(frames[i])
+-
+-    anim = animation.FuncAnimation(plt.gcf(), animate, frames = len(frames), interval=50)
+-    anim.save(path + filename, writer='imagemagick', fps=60)
+-
+-save_frames_as_gif(frames)
+\ No newline at end of file
+diff --git a/ppo_impl/ppo_torch.py b/ppo_impl/ppo_torch.py
+deleted file mode 100644
+index 3fbb130..0000000
+--- a/ppo_impl/ppo_torch.py
++++ /dev/null
+@@ -1,115 +0,0 @@
+-import numpy as np; import torch as th; import scipy as sp; import gym 
+-import os; from collections import deque; import matplotlib.pyplot as plt
+-
+-# RLLab Magic for calculating the discounted return G(t) = R(t) + gamma * R(t-1) 
+-# cf. https://github.com/rll/rllab/blob/ba78e4c16dc492982e648f117875b22af3965579/rllab/misc/special.py#L107
+-cumulate_discount = lambda x, gamma: sp.signal.lfilter([1], [1, - gamma], x[::-1], axis=0)[::-1]
+-
+-class Net(th.nn.Module):
+-  def __init__(self, shape, activation, lr):
+-    super().__init__()
+-    self.net =  th.nn.Sequential(*[ layer 
+-      for io, a in zip(zip(shape[:-1], shape[1:]), [activation] * (len(shape)-2) + [th.nn.Identity] ) 
+-        for layer in [th.nn.Linear(*io), a()]])
+-    self.optimizer =  th.optim.Adam(self.net.parameters(), lr=lr)
+-
+-class ValueNet(Net):
+-  def __init__(self, obs_dim, hidden_sizes=[64,64], activation=th.nn.Tanh, lr=1e-3):
+-    super().__init__([obs_dim] + hidden_sizes + [1], activation, lr)
+-  def forward(self, obs): return self.net(obs)
+-  def loss(self, states, returns): return ((returns - self(states))**2).mean()
+-
+-class PolicyNet(Net):
+-  def __init__(self, obs_dim, act_dim, hidden_sizes=[64,64], activation=th.nn.Tanh, lr=3e-4):
+-    super().__init__([obs_dim] + hidden_sizes + [act_dim], activation, lr)
+-    self.distribution = lambda obs: th.distributions.Categorical(logits=self.net(obs))
+-
+-  def forward(self, obs, act=None, det=False):
+-    """Given an observation: Returns policy distribution and probablilty for a given action 
+-      or Returns a sampled action and its corresponding probablilty"""
+-    pi = self.distribution(obs)
+-    if act is not None: return pi, pi.log_prob(act)
+-    act = self.net(obs).argmax() if det else pi.sample()
+-    return act, pi.log_prob(act)
+-
+-  def loss(self, states, actions, advantages): 
+-    _, logp = self.forward(states, actions)
+-    loss = -(logp * advantages).mean()
+-    return loss
+-
+-class PPO:
+-  """ Autonomous agent using vanilla policy gradient. """
+-  def __init__(self, env, seed=42,  gamma=0.99):
+-    self.env = env; self.gamma = gamma;                       # Setup env and discount 
+-    th.manual_seed(seed);np.random.seed(seed);env.seed(seed)  # Seed Torch, numpy and gym
+-    # Keep track of previous rewards and performed steps to calcule the mean Return metric
+-    self._episode, self.ep_returns, self.num_steps = [], deque(maxlen=100), 0
+-    # Get observation and action shapes
+-    obs_dim = env.observation_space.shape[0] 
+-    act_dim = env.action_space.n                
+-    self.vf = ValueNet(obs_dim)             # Setup Value Network (Critic)
+-    self.pi = PolicyNet(obs_dim, act_dim)   # Setup Policy Network (Actor)
+-
+-  def step(self, obs):
+-    """ Given an observation, get action and probs from policy and values from critc"""
+-    with th.no_grad(): (a, prob), v = self.pi(obs), self.vf(obs)
+-    return a.numpy(), v.numpy()
+-
+-  def policy(self, obs, det=True): return self.pi(th.tensor(obs), det=det)[0].numpy()
+-
+-  def finish_episode(self):
+-    """Process self._episode & reset self.env, Returns (s,a,G,V)-Tuple and new inital state"""
+-    s, a, R, V = (np.array(e) for e in zip(*self._episode)) # Get trajectories from rollout
+-    self.ep_returns.append(sum(R)); self._episode = []      # Add epoisode return to buffer & reset
+-    return (s,a,R,V), self.env.reset()                      # state, action, Return, Value Tensors + new state
+-
+-  def collect_rollout(self, state, n_step=1):               # n_step=1 -> Temporal difference 
+-    rollout, done = [], False                               # Setup rollout buffer and env
+-    for _ in range(n_step):                                 # Repeat for n_steps 
+-      action, value = self.step(th.tensor(state))
+-      #act = action[0]           # Select action according to policy
+-      _state, reward, done, _ = self.env.step(action)       # Execute selected action
+-      self._episode.append((state, action, reward, value))  # Save experience to agent episode for logging
+-      rollout.append((state, action, reward, value))        # Integrate new experience into rollout
+-      state = _state; self.num_steps += 1                   # Update state & step
+-      if done: _, state = self.finish_episode()             # Reset env if done 
+-    s,a,R,V = (np.array(e) for e in zip(*rollout))          # Get trajectories from rollout
+-    value = self.step(th.tensor(state))[1]                  # Get value of next state 
+-    A = G = cumulate_discount(R, self.gamma)                # REINFORCE Advantages (TODO 4-1)
+-    # A = G - V                                               # Actor Critic Advantages (TODO 4-1)
+-    A = R + self.gamma * np.append(V[1:], value) - V        # TD Actor-Critic Advantages (TODO 4-1)
+-    return (th.tensor(x.copy()) for x in (s,a,G,A)), state  # state, action, Return, Advantage Tensors 
+-
+-  def train(self, states, actions, returns, advantages):        # Update policy weights
+-    self.pi.optimizer.zero_grad(); self.vf.optimizer.zero_grad()# Reset optimizer
+-    policy_loss = self.pi.loss(states, actions, advantages)     # Calculate Policy loss
+-    policy_loss.backward(); self.pi.optimizer.step()            # Apply Policy loss 
+-    value_loss = self.vf.loss(states, returns)                  # Calculate Value loss
+-    value_loss.backward(); self.vf.optimizer.step()             # Apply Value loss 
+-    print(f"Policy loss: {policy_loss}")
+-    print(f"Value loss: {value_loss}")
+-
+-  def learn(self, steps):
+-    state, stats = self.env.reset(), []                         # Setup Stats and initial state
+-    while self.num_steps < steps:                               # Train for |steps| interatcions
+-      rollout, state = self.collect_rollout(state)              # Collect Rollout 
+-      stats.append((self.num_steps, np.mean(self.ep_returns)))  # Early Stopping and logging 
+-      if np.mean(self.ep_returns) >= self.env.spec.reward_threshold: return stats  
+-      print(f"At Step {self.num_steps:5d} Mean Return {stats[-1][1]:.2f}", end="\r", flush=True)
+-      self.train(*rollout)                                      # Perfom Update using rollout 
+-    return stats
+-
+-if __name__ == '__main__':
+-  env = gym.make('CartPole-v1')       # Setup Env ['CartPole-v1'|'Acrobot-v1'|'MountainCar-v1']
+-  agent = PPO(env)                    # Setup PPO Agent 
+-  stats = agent.learn(steps=100000)   # Train Agent 
+-
+-  # Find output directory & save final video + training progress 
+-  dir = f"./results/run_{len(next(os.walk('./results'))[1])}"
+-  env = gym.wrappers.Monitor(agent.env, dir, force=True)
+-  state, done = env.reset(), False
+-  while not done: state,_,done,_ = env.step(agent.policy(state))
+-  plt.plot(*zip(*stats)); plt.title("Progress")
+-  plt.xlabel("Timestep"); plt.ylabel("Mean Return")
+-  plt.savefig(f"{dir}/training.png")
+-  
+\ No newline at end of file
+diff --git a/ppo_impl/ppo_torch/ppo_continuous.py b/ppo_impl/ppo_torch/ppo_continuous.py
+index 27eb481..66ea852 100644
+--- a/ppo_impl/ppo_torch/ppo_continuous.py
++++ b/ppo_impl/ppo_torch/ppo_continuous.py
+@@ -21,6 +21,7 @@ import sys
+ import wandb
+ 
+ MODEL_PATH = './models/'
++
+ ####################
+ ####### TODO #######
+ ####################
