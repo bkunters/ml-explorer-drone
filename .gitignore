@@ -9,6 +9,7 @@ ppo_impl/venv/*
 
 # Visual Studio cache directory
 .vs/
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
