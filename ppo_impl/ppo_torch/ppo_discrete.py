@@ -21,6 +21,7 @@ import sys
 import wandb
 
 MODEL_PATH = './models/'
+
 ####################
 ####### TODO #######
 ####################
@@ -52,7 +53,7 @@ class ValueNet(Net):
             obs = torch.tensor(obs, dtype=torch.float)
         x = self.relu(self.layer1(obs))
         x = self.relu(self.layer2(x))
-        out = self.layer3(x) # linear activation
+        out = self.layer3(x) # linear
         return out
     
     def loss(self, obs, rewards):
@@ -69,13 +70,14 @@ class PolicyNet(Net):
         self.layer2 = layer_init(nn.Linear(64, 64))
         self.layer3 = layer_init(nn.Linear(64, out_dim), std=0.01)
         self.tanh = nn.Tanh()
+        self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, obs):
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float)
         x = self.tanh(self.layer1(obs))
         x = self.tanh(self.layer2(x))
-        out = self.layer3(x) # linear if action space is continuous
+        out = self.softmax(self.layer3(x)) # sofmax activation with discrete
         return out
     
     def loss(self, advantages, batch_log_probs, curr_log_probs, clip_eps=0.2):
@@ -138,16 +140,6 @@ class PPO_PolicyGradient:
         action_prob = self.policy_net(obs) # query Policy Network (Actor) for mean action
         return Categorical(logits=action_prob)
 
-    def get_continuous_policy(self, obs):
-        """Make function to compute action distribution in continuous action space."""
-        # Multivariate Normal Distribution Lecture 15.7 (Andrew Ng) https://www.youtube.com/watch?v=JjB58InuTqM
-        # fixes the detection of outliers, allows to capture correlation between features
-        # https://discuss.pytorch.org/t/understanding-log-prob-for-normal-distribution-in-pytorch/73809
-        # 1) Use Normal distribution for continuous space
-        action_prob = self.policy_net(obs) # query Policy Network (Actor) for mean action
-        cov_matrix = torch.diag(torch.full(size=(self.out_dim,), fill_value=0.5))
-        return MultivariateNormal(action_prob, covariance_matrix=cov_matrix)
-
     def get_action(self, dist):
         """Make action selection function (outputs actions, sampled from policy)."""
         action = dist.sample()
@@ -158,17 +150,17 @@ class PPO_PolicyGradient:
     def get_values(self, obs, actions):
         """Make value selection function (outputs values for obs in a batch)."""
         values = self.value_net(obs).squeeze()
-        dist = self.get_continuous_policy(obs)
+        dist = self.get_discrete_policy(obs)
         log_prob = dist.log_prob(actions)
         return values, log_prob
 
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
-        action_dist = self.get_continuous_policy(obs) # self.get_discrete_policy(obs)
+        action_dist = self.get_discrete_policy(obs)
         action, log_prob, entropy = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
 
-    def cummulative_reward(self, rewards):
+    def cummulative_reward(self, rewards): # TODO: FIX 
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
         # G(t) = R(t) + gamma * R(t-1)
         cum_rewards = []
@@ -178,7 +170,7 @@ class PPO_PolicyGradient:
             cum_rewards.append(discounted_reward)
         return cum_rewards
 
-    def advantage_estimate(self, rewards, values, normalized=True):
+    def advantage_estimate(self, rewards, values, normalized=True): # TODO: FIX 
         """Simplest advantage calculation"""
         # STEP 5: compute advantage estimates A_t
         advantages = rewards - values
@@ -302,7 +294,7 @@ class PPO_PolicyGradient:
             
             # logging for monitoring in W&B
             wandb.log({
-                'time steps': num_passed_timesteps,
+                'time/time steps': num_passed_timesteps,
                 'loss/policy loss': policy_loss,
                 'loss/value loss': value_loss,
                 'reward/cummulative reward': batch_rewards2go,
@@ -395,7 +387,7 @@ def arg_parser():
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     return args
 
-def make_env(env_id='Pendulum-v1', seed=42):
+def make_env(env_id='CartPole-v1', seed=42):
     # TODO: Needs to be parallized for parallel simulation
     env = gym.make(env_id)
     # gym wrapper
@@ -444,7 +436,7 @@ if __name__ == '__main__':
     gamma = 0.99                    # discount factor
     adam_epsilon = 1e-5             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8
     epsilon = 0.2                   # clipping factor
-    env_name = 'Pendulum-v1'        # name of OpenAI gym environment
+    env_name = 'CartPole-v1'        # name of OpenAI gym environment
     seed = 42                       # seed gym, env, torch, numpy 
     #'CartPole-v1' 'Pendulum-v1', 'MountainCar-v0'
 
@@ -470,7 +462,7 @@ if __name__ == '__main__':
     logging.info(f'env action space: {act_shape}')
     
     obs_dim = obs_shape[0] 
-    act_dim = act_shape[0] # 2 at CartPole
+    act_dim = 2 # at CartPole
 
     logging.info(f'env observation dim: {obs_dim}')
     logging.info(f'env action dim: {act_dim}')
