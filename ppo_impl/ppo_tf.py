@@ -19,9 +19,9 @@ tfd = tfp.distributions
 # Parameters
 unity_file_name = ""            # Unity environment name
 num_total_steps = 1000           # Total number of epochs to run the training
-learning_rate_policy = 1e-3     # Learning rate for optimizing the neural networks
+learning_rate_policy = 3e-4     # Learning rate for optimizing the neural networks
 learning_rate_value = 1e-3
-num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
+num_epochs = 20                  # Number of epochs per time step to optimize the neural networks
 epsilon = 0.2                   # Epsilon value in the PPO algorithm
 max_trajectory_size = 10000     # max number of trajectory samples to be sampled per time step. 
 trajectory_iterations = 10      # number of batches of episodes
@@ -29,6 +29,7 @@ input_length_net = 4            # input layer size
 policy_output_size = 2          # policy output layer size
 discount_factor = 0.99
 env_name = "CartPole-v1"        # LunarLander-v2 or MountainCar-v0 or CartPole-v1
+continous = False               # Whether the action space is cont.
 
 print(f"Tensorflow version: {tf.__version__}")
 
@@ -49,6 +50,8 @@ class PolicyNetwork(tf.keras.Model):
         self.dense2 = Dense(units=64, activation='tanh')
         self.dense3 = Dense(units=64, activation='tanh')
         self.out = Dense(units=policy_output_size, activation='softmax') # 'linear' if the action space is continous
+        if continous:
+            self.out = Dense(units=policy_output_size, activation='tanh')
 
     def call(self, x):
         x = self.dense1(x)
@@ -83,6 +86,8 @@ class ValueNetwork(tf.keras.Model):
 # Setup the actor/critic networks
 policy_net = PolicyNetwork()
 value_net = ValueNetwork()
+#policy_net = tf.keras.models.load_model(f"{env_name}_policy_model")
+#value_net = tf.keras.models.load_model(f"{env_name}_value_model")
 
 #
 #
@@ -173,6 +178,7 @@ for epochs in range(num_total_steps):
     num_batches = 0
     mean_return = 0
     batch = 0
+    num_episodes = 0
 
     print("Collecting batch trajectories...")
     for iter in range(trajectory_iterations):
@@ -185,6 +191,10 @@ for epochs in range(num_total_steps):
 
             current_action_prob = policy_net(observation.reshape(1,input_length_net))
             current_action_dist = tfd.Categorical(probs=current_action_prob)
+            if continous:
+                action_std = tf.ones_like(current_action_prob)
+                current_action_dist = tfd.MultivariateNormalDiag(current_action_prob, action_std)
+                
             current_action = current_action_dist.sample(seed=42).numpy()[0]
             trajectory_actions.append(current_action)
 
@@ -237,6 +247,10 @@ for epochs in range(num_total_steps):
             policy_dist             = policy_net(trajectory_observations)
             #policy_action_prob      = tf.experimental.numpy.max(policy_dist[:, :], axis=1)
             dist                    = tfd.Categorical(probs=policy_dist)
+            if continous:
+                action_std = tf.ones_like(policy_dist)
+                dist = tfd.MultivariateNormalDiag(policy_dist, action_std)
+            
             policy_action_prob      = dist.prob(trajectory_actions)
             
             # Policy loss update
@@ -277,9 +291,9 @@ for epochs in range(num_total_steps):
         'mean return': mean_return})
 
     with train_summary_writer.as_default():
-        tf.summary.scalar('policy loss', policy_loss, step=num_episodes)
-        tf.summary.scalar('value loss', value_loss, step=num_episodes)
-        tf.summary.scalar('mean return', mean_return, step=num_episodes)
+        tf.summary.scalar('policy loss', policy_loss, step=num_passed_timesteps)
+        tf.summary.scalar('value loss', value_loss, step=num_passed_timesteps)
+        tf.summary.scalar('mean return', mean_return, step=num_passed_timesteps)
    
 env.close()
 wandb.run.finish() if wandb and wandb.run else None
