@@ -136,7 +136,7 @@ current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 train_log_dir = f'logs/gradient_tape/{env_name}' + current_time + '/train'
 train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 wandb.init(
-    project=f'drone-mechanics-ppo',
+    project=f'drone-mechanics-ppoTF-OpenAIGym',
     entity='drone-mechanics',
     sync_tensorboard=True,
     config={ # stores hyperparams in job
@@ -285,10 +285,10 @@ for epochs in range(num_total_steps):
 
     # Log into tensorboard & Wandb
     wandb.log({
-        'time steps': num_passed_timesteps, 
-        'policy loss': policy_loss, 
-        'value loss': value_loss, 
-        'mean return': mean_return})
+        'time/time steps': num_passed_timesteps, 
+        'loss/policy loss': policy_loss, 
+        'loss/value loss': value_loss, 
+        'reward/mean reward': mean_return})
 
     with train_summary_writer.as_default():
         tf.summary.scalar('policy loss', policy_loss, step=num_passed_timesteps)
