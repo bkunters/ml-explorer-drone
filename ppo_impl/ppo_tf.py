@@ -159,6 +159,12 @@ num_passed_timesteps = 0
 sum_rewards = 0
 num_episodes = 1
 last_mean_reward = 0
+
+'''
+    Main training loop.
+
+    The agent is trained for @num_total_steps times.
+'''
 for epochs in range(num_total_steps):
 
     episodes = []
@@ -173,22 +179,21 @@ for epochs in range(num_total_steps):
     total_value = 0
     observation, info = env.reset()
 
-    # Collect trajectory
     total_reward = 0
     num_batches = 0
     mean_return = 0
     batch = 0
     num_episodes = 0
 
-    print("Collecting batch trajectories...")
+    '''
+        The trajectories are collected in batches and will be saved to memory.
+        The information is used for training the policy and value networks.
+    '''
     for iter in range(trajectory_iterations):
         while True:
-
-            batch = 0
             trajectory_observations.append(observation)
 
-            num_batches += 1
-
+            # Sample action of the agent
             current_action_prob = policy_net(observation.reshape(1,input_length_net))
             current_action_dist = tfd.Categorical(probs=current_action_prob)
             if continous:
@@ -198,7 +203,7 @@ for epochs in range(num_total_steps):
             current_action = current_action_dist.sample(seed=42).numpy()[0]
             trajectory_actions.append(current_action)
 
-            # Sample new state etc. from environment
+            # Sample new state from environment with the current action
             observation, reward, terminated, truncated, info = env.step(current_action)
             num_passed_timesteps += 1
             sum_rewards += reward
@@ -207,27 +212,24 @@ for epochs in range(num_total_steps):
             # Collect trajectory sample
             trajectory_rewards.append(reward)
             trajectory_action_probs.append(current_action_dist.prob(current_action))
-
             value = value_net(observation.reshape((1,input_length_net)))
             values.append(value)
-
-            batch += 1
                 
             if terminated or truncated:
                 observation, info = env.reset()
 
-                # Compute advantages at the end of the episode
+                # Compute advantages at the end of the trajectory
                 new_adv = np.array(total_reward, dtype=np.float32) - np.array(values, dtype=np.float32)
                 new_adv = np.squeeze(new_adv)
                 trajectory_advantages = np.append(trajectory_advantages, new_adv)
                 trajectory_advantages = trajectory_advantages.flatten()
 
                 num_episodes += 1
-                batch = 0
                 total_reward = 0
                 values = []
                 break
 
+    # Compute the mean cumulative reward.
     mean_return = sum_rewards / num_episodes
     sum_rewards = 0
     print(f"Mean cumulative reward: {mean_return}", flush=True)
@@ -240,12 +242,10 @@ for epochs in range(num_total_steps):
     trajectory_advantages    = (trajectory_advantages - np.mean(trajectory_advantages)) / (np.std(trajectory_advantages) + 1e-8)
 
     # Update the network loop
-    print("Updating the neural networks...")
     for epoch in range(num_epochs):
 
         with tf.GradientTape() as policy_tape:
             policy_dist             = policy_net(trajectory_observations)
-            #policy_action_prob      = tf.experimental.numpy.max(policy_dist[:, :], axis=1)
             dist                    = tfd.Categorical(probs=policy_dist)
             if continous:
                 action_std = tf.ones_like(policy_dist)
