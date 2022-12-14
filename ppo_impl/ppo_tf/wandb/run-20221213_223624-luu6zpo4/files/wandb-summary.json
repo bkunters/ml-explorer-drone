@@ -1,1 +1,0 @@
-{"steps/time steps": 5621, "loss/policy loss": -0.006017942447215319, "loss/value loss": 1.0432153940200806, "reward/mean reward": 7.132231404958677, "_timestamp": 1670967511.8748648, "_runtime": 126.89499592781067, "_step": 11, "_wandb": {"runtime": 128}}

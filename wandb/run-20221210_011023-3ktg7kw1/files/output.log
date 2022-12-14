@@ -1,5 +1,0 @@
-
-INFO:root:Updating the neural network...
-DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): o151352.ingest.sentry.io:443
-DEBUG:urllib3.connectionpool:https://o151352.ingest.sentry.io:443 "POST /api/5288891/envelope/ HTTP/1.1" 200 2
-/Users/janinaalicamattes/miniforge3/envs/pytorch-ppo-research/lib/python3.10/site-packages/torch/nn/modules/loss.py:530: UserWarning: Using a target size (torch.Size([4817])) that is different to the input size (torch.Size([4817, 1])). This will likely lead to incorrect results due to broadcasting. Please ensure they have the same size.
