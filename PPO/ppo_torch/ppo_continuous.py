@@ -56,11 +56,10 @@ class ValueNet(Net):
         out = self.layer3(x) # head has linear activation
         return out
     
-    def loss(self, obs, rewards):
+    def loss(self, values, returns):
         """Objective function defined by mean-squared error"""
-        values = self(obs).squeeze()
-        #return 0.5 * ((rewards - values)**2).mean() # MSE loss
-        return nn.MSELoss()(values, rewards)
+        # return 0.5 * ((rewards - values)**2).mean() # MSE loss
+        return nn.MSELoss()(values, returns)
 
 class PolicyNet(Net):
     """Setup Policy Network (Actor)"""
@@ -126,6 +125,9 @@ class PPO_PolicyGradient:
         # environment
         self.env = env
 
+        # keep track of rewards per episode
+        self.ep_returns = []
+
         # add net for actor and critic
         self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor)
         self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic)
@@ -167,21 +169,22 @@ class PPO_PolicyGradient:
         action, log_prob, entropy = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
 
-    def cummulative_reward(self, rewards):
+    def cummulative_reward(self, batch_rewards):
         """Calculate cummulative rewards with discount factor gamma."""
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
         # G(t) = R(t) + gamma * R(t-1)
         cum_rewards = []
-        discounted_reward = 0
-        for reward in reversed(rewards):
-            discounted_reward = reward + (self.gamma * discounted_reward)
-            cum_rewards.append(discounted_reward)
-        return cum_rewards
+        for rewards in reversed(batch_rewards):
+            discounted_reward = 0
+            for reward in reversed(rewards):
+                discounted_reward = reward + (self.gamma * discounted_reward)
+                cum_rewards.insert(0, discounted_reward)
+        return torch.tensor(cum_rewards, dtype=torch.float)
 
-    def advantage_estimate(self, rewards, values, normalized=True):
+    def advantage_estimate(self, returns, values, normalized=True):
         """Simplest advantage calculation"""
         # STEP 5: compute advantage estimates A_t at step t
-        advantages = rewards - values
+        advantages = returns - values
         if normalized:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         return advantages
@@ -189,72 +192,95 @@ class PPO_PolicyGradient:
     def generalized_advantage_estimate(self):
         pass
     
-    def collect_rollout(self, obs, n_step=1, render=True):
+    def collect_rollout(self, n_step=1, render=True):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
         
-        self.num_episodes = 0
-        done = False
+        step, ep_rewards = 0, []
 
         # collect trajectories
         trajectory_obs = []
         trajectory_actions = []
         trajectory_action_probs = []
-        trajectory_rewards = []
-        trajectory_advantages = []
-        trajectory_values = []
+        batch_rewards = []
+        batch_lens = []
 
-        # Run an episode 
+        # Run simulation for n timesteps per batch
         logging.info("Collecting batch trajectories...")
-        for _ in range(n_step):
+        while step < n_step:
+            
+            obs = self.env.reset()
+            done = False
 
-            while True: 
+            # Run episode for a fixed amount of timesteps
+            # to keep rollout size fixed
+            for ep_t in range(self.max_trajectory_size):
                 # render gym env
                 if render:
                     self.env.render(mode='human')
-                    
+                
+                step += 1 
+
                 # action logic
                 action, log_probability, _ = self.step(obs)
                         
                 # STEP 3: collecting set of trajectories D_k by running action 
                 # that was sampled from policy in environment
                 __obs, reward, done, _ = self.env.step(action)
-                value = self.get_value(__obs)
 
                 # collection of trajectories in batches
                 trajectory_obs.append(obs)
                 trajectory_actions.append(action)
                 trajectory_action_probs.append(log_probability)
-                trajectory_rewards.append(reward)
-                trajectory_values.append(value.detach())
+                ep_rewards.append(reward)
                     
                 obs = __obs
 
                 # break out of loop if episode is terminated
                 if done:
-                    # STEP 4: Calculate cummulated reward
-                    total_reward = sum(trajectory_rewards) # TODO: Is this correct? 
-                    # STEP 5: compute advantage estimates A_t at timestep num_steps
-                    advantage = self.advantage_estimate(np.array(total_reward, dtype=np.float32), np.array(trajectory_values, dtype=np.float32))
-                    trajectory_advantages = advantage
+                    # # STEP 4: Calculate cummulated reward
+                    # total_reward = sum(trajectory_rewards) # TODO: Is this correct? 
+                    # # STEP 5: compute advantage estimates A_t at timestep num_steps
+                    # # calculate advantage in different ways --> GAE can be done later
+                    # # keep the rollout size fixed --> episodes should stay independent
+                    # # log when episode end
+                    # advantage = self.advantage_estimate(np.array(total_reward, dtype=np.float32), \
+                    #                                     np.array(trajectory_values, dtype=np.float32))
+                    # trajectory_advantages = advantage
 
-                    self.num_episodes += 1
+                    # self.num_episodes += 1
                     
-                    # reset values
-                    trajectory_values = []
-                    obs = self.env.reset()
+                    # # reset values
+                    # trajectory_values = []
+                    # obs = self.env.reset()
+                    ep_rewards = []
                     break
-        
+            
+            batch_lens.append(ep_t + 1)
+            batch_rewards.append(ep_rewards)
+
         # convert trajectories to torch tensors
         obs = torch.tensor(np.array(trajectory_obs), dtype=torch.float)
         actions = torch.tensor(np.array(trajectory_actions), dtype=torch.float)
         log_probs = torch.tensor(np.array(trajectory_action_probs), dtype=torch.float)
-        rewards = torch.tensor(np.array(trajectory_rewards), dtype=torch.float)
-        advantages = torch.tensor(np.array(trajectory_advantages), dtype=torch.float)
+        
+        # STEP 4: Calculate cummulated reward
+        cummulative_reward = self.cummulative_reward(batch_rewards)
+        cummulative_reward = torch.tensor(np.array(cummulative_reward), dtype=torch.float)
 
-        return obs, actions, log_probs, rewards, advantages
+        # Calculate the stats
+        mean_ep_lens = np.mean(batch_lens)
+        mean_ep_rews = np.mean([np.sum(ep_rews) for ep_rews in batch_rewards])
+
+        # Log stats
+        wandb.log({
+            "train/mean episode length": mean_ep_lens,
+            "train/mean episode returns": mean_ep_rews,
+        })
+
+        return obs, actions, log_probs, cummulative_reward, batch_lens, mean_ep_rews
                 
 
-    def train(self, obs, rewards, advantages, batch_log_probs, curr_log_probs, epsilon):
+    def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
         """Calculate loss and update weights of both networks."""
         logging.info("Updating network parameter...")
         # loss of the policy network
@@ -265,7 +291,7 @@ class PPO_PolicyGradient:
 
         # loss of the value network
         self.value_net_optim.zero_grad() # reset optimizer
-        value_loss = self.value_net.loss(obs, rewards) # TODO: Use V - rewards or V - advantages? 
+        value_loss = self.value_net.loss(values, returns) # TODO: discounted return 
         value_loss.backward()
         self.value_net_optim.step()
 
@@ -273,22 +299,27 @@ class PPO_PolicyGradient:
 
     def learn(self):
         """"""
-        best_mean_reward = 0
-        for steps in range(self.total_steps):
+        steps, best_mean_reward = 0, 0
+
+        while steps < self.total_steps:
         
-            next_obs = self.env.reset()
             # Collect trajectory
-            # STEP 3-4: imulate and collect trajectories --> the following values are all per batch
-            obs, actions, log_probs, rewards, advantages = self.collect_rollout(obs=next_obs, n_step=self.trajectory_iterations)
+            # STEP 3-4: simulate and collect trajectories --> the following values are all per batch
+            obs, actions, log_probs, cum_return, batch_lens, mean_reward = self.collect_rollout(n_step=self.trajectory_iterations)
             
-            # calculate mean reward per episode
-            mean_reward = sum(rewards) / self.num_episodes # mean return
+            # timesteps for batch collection
+            steps += np.sum(batch_lens)
+
+            # STEP 5: compute advantage estimates A_t at timestep t_step
+            values, _ = self.get_values(obs, actions)
+            advantages = self.advantage_estimate(cum_return, values.detach())
             
+            # TODO: fix frequency of the updates --> improve the algorithm 
             for _ in range(self.num_epochs):
-                _, curr_log_probs = self.get_values(obs, actions)
                 # STEP 6-7: calculate loss and update weights
-                policy_loss, value_loss = self.train(obs, rewards, advantages, log_probs, curr_log_probs, self.epsilon)
-                
+                values, curr_log_probs = self.get_values(obs, actions)
+                policy_loss, value_loss = self.train(values, cum_return, advantages, log_probs, curr_log_probs, self.epsilon)
+
             logging.info('###########################################')
             logging.info(f"Mean cummulative reward: {mean_reward}")
             logging.info(f"Policy loss: {policy_loss}")
@@ -298,10 +329,9 @@ class PPO_PolicyGradient:
             
             # logging for monitoring in W&B
             wandb.log({
-                'time/step': steps,
-                'loss/policy loss': policy_loss,
-                'loss/value loss': value_loss,
-                'reward/mean return': mean_reward})
+                'train/step': steps,
+                'train/policy loss': policy_loss,
+                'train/value loss': value_loss})
             
             # store model in checkpoints
             if mean_reward > best_mean_reward:
@@ -387,8 +417,8 @@ if __name__ == '__main__':
     # Hyperparameter
     unity_file_name = ''            # name of unity environment
     total_steps = 1000              # time steps to train agent
-    max_trajectory_size = 10000     # max number of trajectory samples to be sampled per time step. 
-    trajectory_iterations = 10      # number of batches of episodes
+    max_trajectory_size = 1600      # max number of trajectory samples to be sampled per time step. 
+    trajectory_iterations = 4600    # number of batches of episodes
     num_epochs = 20                 # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4          # learning rate for policy network
     learning_rate_v = 1e-3          # learning rate for value network
