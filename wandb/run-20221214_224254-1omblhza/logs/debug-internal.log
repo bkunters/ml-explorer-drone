@@ -1,0 +1,63 @@
+2022-12-14 22:42:54,299 INFO    StreamThr :4939 [internal.py:wandb_internal():87] W&B internal server running at pid: 4939, started at: 2022-12-14 22:42:54.297628
+2022-12-14 22:42:54,302 DEBUG   HandlerThread:4939 [handler.py:handle_request():139] handle_request: status
+2022-12-14 22:42:54,305 DEBUG   SenderThread:4939 [sender.py:send_request():317] send_request: status
+2022-12-14 22:42:54,309 INFO    WriterThread:4939 [datastore.py:open_for_write():75] open: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/run-1omblhza.wandb
+2022-12-14 22:42:54,309 DEBUG   SenderThread:4939 [sender.py:send():303] send: header
+2022-12-14 22:42:54,309 DEBUG   SenderThread:4939 [sender.py:send():303] send: run
+2022-12-14 22:42:54,807 INFO    SenderThread:4939 [dir_watcher.py:__init__():216] watching files in: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files
+2022-12-14 22:42:54,807 INFO    SenderThread:4939 [sender.py:_start_run_threads():928] run started: 1omblhza with start time 1671054174.285209
+2022-12-14 22:42:54,808 DEBUG   SenderThread:4939 [sender.py:send():303] send: summary
+2022-12-14 22:42:54,808 INFO    SenderThread:4939 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-14 22:42:54,810 DEBUG   HandlerThread:4939 [handler.py:handle_request():139] handle_request: check_version
+2022-12-14 22:42:54,810 DEBUG   SenderThread:4939 [sender.py:send_request():317] send_request: check_version
+2022-12-14 22:42:54,966 DEBUG   HandlerThread:4939 [handler.py:handle_request():139] handle_request: run_start
+2022-12-14 22:42:54,973 DEBUG   HandlerThread:4939 [system_info.py:__init__():31] System info init
+2022-12-14 22:42:54,973 DEBUG   HandlerThread:4939 [system_info.py:__init__():46] System info init done
+2022-12-14 22:42:54,973 INFO    HandlerThread:4939 [system_monitor.py:start():150] Starting system monitor
+2022-12-14 22:42:54,974 INFO    HandlerThread:4939 [system_monitor.py:probe():171] Collecting system info
+2022-12-14 22:42:54,974 DEBUG   HandlerThread:4939 [system_info.py:probe():195] Probing system
+2022-12-14 22:42:54,974 INFO    SystemMonitor:4939 [system_monitor.py:_start():116] Starting system asset monitoring threads
+2022-12-14 22:42:54,975 INFO    SystemMonitor:4939 [interfaces.py:start():168] Started cpu
+2022-12-14 22:42:54,976 INFO    SystemMonitor:4939 [interfaces.py:start():168] Started disk
+2022-12-14 22:42:54,978 INFO    SystemMonitor:4939 [interfaces.py:start():168] Started gpuapple
+2022-12-14 22:42:54,983 INFO    SystemMonitor:4939 [interfaces.py:start():168] Started memory
+2022-12-14 22:42:54,985 DEBUG   HandlerThread:4939 [system_info.py:_probe_git():180] Probing git
+2022-12-14 22:42:54,985 INFO    SystemMonitor:4939 [interfaces.py:start():168] Started network
+2022-12-14 22:42:55,001 DEBUG   HandlerThread:4939 [system_info.py:_probe_git():188] Probing git done
+2022-12-14 22:42:55,001 DEBUG   HandlerThread:4939 [system_info.py:probe():241] Probing system done
+2022-12-14 22:42:55,001 DEBUG   HandlerThread:4939 [system_monitor.py:probe():180] {'os': 'macOS-13.0.1-arm64-arm-64bit', 'python': '3.10.8', 'heartbeatAt': '2022-12-14T21:42:54.974347', 'startedAt': '2022-12-14T21:42:54.242314', 'docker': None, 'cuda': None, 'args': (), 'state': 'running', 'program': '/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/ppo_continuous.py', 'codePath': 'PPO/ppo_torch/ppo_continuous.py', 'git': {'remote': 'git@github.com:bkunters/ml-explorer-drone.git', 'commit': '2f929e99dda18d14875731274576413223f58d8e'}, 'email': 'janina.alica.mattes@gmail.com', 'root': '/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone', 'host': 'Janinas-MacBook-Pro.local', 'username': 'janinaalicamattes', 'executable': '/Users/janinaalicamattes/miniforge3/envs/pytorch-ppo-research/bin/python', 'cpu_count': 8, 'cpu_count_logical': 8, 'disk': {'total': 460.4317207336426, 'used': 8.218391418457031}, 'gpuapple': {'type': 'arm', 'vendor': 'Apple'}, 'memory': {'total': 16.0}}
+2022-12-14 22:42:55,001 INFO    HandlerThread:4939 [system_monitor.py:probe():181] Finished collecting system info
+2022-12-14 22:42:55,001 INFO    HandlerThread:4939 [system_monitor.py:probe():184] Publishing system info
+2022-12-14 22:42:55,001 DEBUG   HandlerThread:4939 [system_info.py:_save_pip():51] Saving list of pip packages installed into the current environment
+2022-12-14 22:42:55,002 DEBUG   HandlerThread:4939 [system_info.py:_save_pip():67] Saving pip packages done
+2022-12-14 22:42:55,002 DEBUG   HandlerThread:4939 [system_info.py:_save_conda():74] Saving list of conda packages installed into the current environment
+2022-12-14 22:42:55,816 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/conda-environment.yaml
+2022-12-14 22:42:55,817 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/requirements.txt
+2022-12-14 22:42:55,817 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/wandb-summary.json
+2022-12-14 22:42:56,092 DEBUG   HandlerThread:4939 [system_info.py:_save_conda():86] Saving conda packages done
+2022-12-14 22:42:56,092 DEBUG   HandlerThread:4939 [system_info.py:_save_code():89] Saving code
+2022-12-14 22:42:56,103 DEBUG   HandlerThread:4939 [system_info.py:_save_code():110] Saving code done
+2022-12-14 22:42:56,103 DEBUG   HandlerThread:4939 [system_info.py:_save_patches():127] Saving git patches
+2022-12-14 22:42:56,164 DEBUG   HandlerThread:4939 [system_info.py:_save_patches():169] Saving git patches done
+2022-12-14 22:42:56,165 INFO    HandlerThread:4939 [system_monitor.py:probe():186] Finished publishing system info
+2022-12-14 22:42:56,255 DEBUG   SenderThread:4939 [sender.py:send():303] send: files
+2022-12-14 22:42:56,255 INFO    SenderThread:4939 [sender.py:_save_file():1171] saving file wandb-metadata.json with policy now
+2022-12-14 22:42:56,255 INFO    SenderThread:4939 [sender.py:_save_file():1171] saving file code/PPO/ppo_torch/ppo_continuous.py with policy now
+2022-12-14 22:42:56,256 INFO    SenderThread:4939 [sender.py:_save_file():1171] saving file diff.patch with policy now
+2022-12-14 22:42:56,261 DEBUG   HandlerThread:4939 [handler.py:handle_request():139] handle_request: stop_status
+2022-12-14 22:42:56,261 DEBUG   SenderThread:4939 [sender.py:send_request():317] send_request: stop_status
+2022-12-14 22:42:56,612 DEBUG   SenderThread:4939 [sender.py:send():303] send: telemetry
+2022-12-14 22:42:56,626 INFO    Thread-23 :4939 [upload_job.py:push():123] Skipped uploading /var/folders/4h/v0fwv1zs4596mmdvwj516k840000gn/T/tmpecnvgcerwandb/ug2b40co-code/PPO/ppo_torch/ppo_continuous.py
+2022-12-14 22:42:56,817 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/conda-environment.yaml
+2022-12-14 22:42:56,817 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/output.log
+2022-12-14 22:42:56,818 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/code/PPO/ppo_torch/ppo_continuous.py
+2022-12-14 22:42:56,818 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/diff.patch
+2022-12-14 22:42:56,818 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/wandb-metadata.json
+2022-12-14 22:42:56,818 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/code
+2022-12-14 22:42:56,818 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/code/PPO
+2022-12-14 22:42:56,818 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/code/PPO/ppo_torch
+2022-12-14 22:42:57,083 INFO    Thread-22 :4939 [upload_job.py:push():143] Uploaded file /var/folders/4h/v0fwv1zs4596mmdvwj516k840000gn/T/tmpecnvgcerwandb/2x0ri3q2-wandb-metadata.json
+2022-12-14 22:42:57,115 INFO    Thread-24 :4939 [upload_job.py:push():143] Uploaded file /var/folders/4h/v0fwv1zs4596mmdvwj516k840000gn/T/tmpecnvgcerwandb/24mizh8r-diff.patch
+2022-12-14 22:42:58,830 INFO    Thread-19 :4939 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/wandb/run-20221214_224254-1omblhza/files/output.log
+2022-12-14 22:43:11,620 DEBUG   HandlerThread:4939 [handler.py:handle_request():139] handle_request: stop_status
+2022-12-14 22:43:11,620 DEBUG   SenderThread:4939 [sender.py:send_request():317] send_request: stop_status

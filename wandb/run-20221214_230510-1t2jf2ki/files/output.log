@@ -1,0 +1,7 @@
+DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): o151352.ingest.sentry.io:443
+DEBUG:urllib3.connectionpool:https://o151352.ingest.sentry.io:443 "POST /api/5288891/envelope/ HTTP/1.1" 200 2
+INFO:root:Collecting batch trajectories...
+/Users/janinaalicamattes/miniforge3/envs/pytorch-ppo-research/lib/python3.10/site-packages/numpy/core/fromnumeric.py:3432: RuntimeWarning: Mean of empty slice.
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/Users/janinaalicamattes/miniforge3/envs/pytorch-ppo-research/lib/python3.10/site-packages/numpy/core/_methods.py:190: RuntimeWarning: invalid value encountered in double_scalars
+  ret = ret.dtype.type(ret / rcount)

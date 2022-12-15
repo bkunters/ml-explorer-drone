@@ -280,7 +280,7 @@ class PPO_PolicyGradient:
 
             # loop for network update
             for epoch in range(self.num_epochs):
-                values, curr_v_log_probs = self.get_values(batch_obs, batch_actions)
+                _, curr_v_log_probs = self.get_values(batch_obs, batch_actions)
                 # STEP 6-7: calculate loss and update weights
                 policy_loss, value_loss = self.train(batch_obs, \
                     batch_rewards2go, advantages, batch_log_probs=batch_a_log_probs, \

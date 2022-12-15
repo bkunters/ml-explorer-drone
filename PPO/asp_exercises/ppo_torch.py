@@ -40,7 +40,8 @@ class PolicyNet(Net):
 class PPO:
   """ Autonomous agent using vanilla policy gradient. """
   def __init__(self, env, seed=42,  gamma=0.99):
-    self.env = env; self.gamma = gamma;                       # Setup env and discount 
+    self.env = env; 
+    self.gamma = gamma;                       # Setup env and discount 
     th.manual_seed(seed);np.random.seed(seed);env.seed(seed)  # Seed Torch, numpy and gym
     # Keep track of previous rewards and performed steps to calcule the mean Return metric
     self._episode, self.ep_returns, self.num_steps = [], deque(maxlen=100), 0
@@ -52,7 +53,8 @@ class PPO:
 
   def step(self, obs):
     """ Given an observation, get action and probs from policy and values from critc"""
-    with th.no_grad(): (a, prob), v = self.pi(obs), self.vf(obs)
+    with th.no_grad(): 
+      (a, prob), v = self.pi(obs), self.vf(obs)
     return a.numpy(), v.numpy()
 
   def policy(self, obs, det=True): return self.pi(th.tensor(obs), det=det)[0].numpy()
@@ -60,7 +62,8 @@ class PPO:
   def finish_episode(self):
     """Process self._episode & reset self.env, Returns (s,a,G,V)-Tuple and new inital state"""
     s, a, R, V = (np.array(e) for e in zip(*self._episode)) # Get trajectories from rollout
-    self.ep_returns.append(sum(R)); self._episode = []      # Add epoisode return to buffer & reset
+    self.ep_returns.append(sum(R))
+    self._episode = []                                      # Add epoisode return to buffer & reset
     return (s,a,R,V), self.env.reset()                      # state, action, Return, Value Tensors + new state
 
   def collect_rollout(self, state, n_step=1):               # n_step=1 -> Temporal difference 
@@ -71,8 +74,11 @@ class PPO:
       _state, reward, done, _ = self.env.step(action)       # Execute selected action
       self._episode.append((state, action, reward, value))  # Save experience to agent episode for logging
       rollout.append((state, action, reward, value))        # Integrate new experience into rollout
-      state = _state; self.num_steps += 1                   # Update state & step
-      if done: _, state = self.finish_episode()             # Reset env if done 
+      state = _state; 
+      self.num_steps += 1                                   # Update state & step
+      if done: 
+        _, state = self.finish_episode()             # Reset env if done 
+    
     s,a,R,V = (np.array(e) for e in zip(*rollout))          # Get trajectories from rollout
     value = self.step(th.tensor(state))[1]                  # Get value of next state 
     A = G = cumulate_discount(R, self.gamma)                # REINFORCE Advantages (TODO 4-1)
@@ -108,7 +114,8 @@ if __name__ == '__main__':
   dir = f"./results/run_{len(next(os.walk('./results'))[1])}"
   env = gym.wrappers.Monitor(agent.env, dir, force=True)
   state, done = env.reset(), False
-  while not done: state,_,done,_ = env.step(agent.policy(state))
+  while not done: 
+    state,_,done,_ = env.step(agent.policy(state))
   plt.plot(*zip(*stats)); plt.title("Progress")
   plt.xlabel("Timestep"); plt.ylabel("Mean Return")
   plt.savefig(f"{dir}/training.png")
