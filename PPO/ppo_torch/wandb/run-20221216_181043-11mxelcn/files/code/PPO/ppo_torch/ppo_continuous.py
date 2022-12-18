@@ -126,7 +126,7 @@ class PPO_PolicyGradient:
         self.env = env
 
         # keep track of rewards per episode
-        self.ep_returns = deque(maxlen=max_trajectory_size)
+        self.ep_returns = []
 
         # add net for actor and critic
         self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor)
@@ -189,9 +189,6 @@ class PPO_PolicyGradient:
     def generalized_advantage_estimate(self):
         pass
     
-    def finish_episode(self):
-        pass 
-
     def collect_rollout(self, n_step=1, render=True):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
         
@@ -204,25 +201,23 @@ class PPO_PolicyGradient:
         batch_rewards = []
         batch_lens = []
 
-        # Run Monte Carlo simulation for n timesteps per batch
+        # Run simulation for n timesteps per batch
         logging.info("Collecting batch trajectories...")
         while step < n_step:
             
-            # rewards collected per episode
-            ep_rewards, done = [], False 
             obs = self.env.reset()
+            done = False
 
             # Run episode for a fixed amount of timesteps
             # to keep rollout size fixed and episodes independent
-            for ep_t in range(0, self.max_trajectory_size):
+            for ep_t in range(self.max_trajectory_size):
                 # render gym envs
                 if render:
                     self.env.render(mode='human')
                 
                 step += 1 
 
-                # action logic 
-                # sampled via policy which defines behavioral strategy of an agent
+                # action logic
                 action, log_probability, _ = self.step(obs)
                         
                 # STEP 3: collecting set of trajectories D_k by running action 
@@ -239,10 +234,12 @@ class PPO_PolicyGradient:
 
                 # break out of loop if episode is terminated
                 if done:
-                    print(f"Episode length {ep_t}")
+                    # # reset values
+                    obs = self.env.reset()
+                    ep_rewards = []
                     break
             
-            batch_lens.append(ep_t + 1) # as we started at 0
+            batch_lens.append(ep_t + 1)
             batch_rewards.append(ep_rewards)
 
         # convert trajectories to torch tensors
@@ -308,7 +305,7 @@ class PPO_PolicyGradient:
                 policy_loss, value_loss = self.train(values, cum_return, advantages, log_probs, curr_log_probs, self.epsilon)
 
             logging.info('###########################################')
-            logging.info(f"Mean return: {mean_reward}")
+            logging.info(f"Mean cummulative reward: {mean_reward}")
             logging.info(f"Policy loss: {policy_loss}")
             logging.info(f"Value loss: {value_loss}")
             logging.info(f"Time step: {steps}")
@@ -403,11 +400,11 @@ if __name__ == '__main__':
     args = arg_parser()
     # Hyperparameter
     unity_file_name = ''            # name of unity environment
-    total_steps = 3000000           # time steps to train agent
-    max_trajectory_size = 1000      # max number of trajectory samples to be sampled per time step. 
+    total_steps = 1000              # time steps to train agent
+    max_trajectory_size = 1600      # max number of trajectory samples to be sampled per time step. 
     trajectory_iterations = 4600    # number of batches of episodes
-    num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
-    learning_rate_p = 1e-3          # learning rate for policy network
+    num_epochs = 20                 # Number of epochs per time step to optimize the neural networks
+    learning_rate_p = 1e-4          # learning rate for policy network
     learning_rate_v = 1e-3          # learning rate for value network
     gamma = 0.99                    # discount factor
     adam_epsilon = 1e-5             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8
@@ -464,8 +461,7 @@ if __name__ == '__main__':
             'learning rate (value net)': learning_rate_v,
             'epsilon (adam optimizer)': adam_epsilon,
             'gamma (discount)': gamma,
-            'epsilon (clipping)': epsilon,
-            'seerd': seed
+            'epsilon (clipping)': epsilon
         },
     name=f"{env_name}__{current_time}",
     # monitor_gym=True,
@@ -486,7 +482,7 @@ if __name__ == '__main__':
                 epsilon=epsilon,
                 adam_eps=adam_epsilon)
     
-    # run training for a total amount of steps
+    # run training
     agent.learn()
     logging.info('### Done ###')
 
