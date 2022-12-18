@@ -1,0 +1,178 @@
+2022-12-18 14:49:15,652 INFO    StreamThr :17465 [internal.py:wandb_internal():87] W&B internal server running at pid: 17465, started at: 2022-12-18 14:49:15.650440
+2022-12-18 14:49:15,653 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: status
+2022-12-18 14:49:15,654 DEBUG   SenderThread:17465 [sender.py:send_request():317] send_request: status
+2022-12-18 14:49:15,655 DEBUG   SenderThread:17465 [sender.py:send():303] send: header
+2022-12-18 14:49:15,656 INFO    WriterThread:17465 [datastore.py:open_for_write():75] open: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/run-17ezvbe9.wandb
+2022-12-18 14:49:15,662 DEBUG   SenderThread:17465 [sender.py:send():303] send: run
+2022-12-18 14:49:16,138 INFO    SenderThread:17465 [dir_watcher.py:__init__():216] watching files in: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files
+2022-12-18 14:49:16,138 INFO    SenderThread:17465 [sender.py:_start_run_threads():928] run started: 17ezvbe9 with start time 1671371355.643376
+2022-12-18 14:49:16,138 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:16,139 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:16,140 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: check_version
+2022-12-18 14:49:16,140 DEBUG   SenderThread:17465 [sender.py:send_request():317] send_request: check_version
+2022-12-18 14:49:16,303 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: run_start
+2022-12-18 14:49:16,311 DEBUG   HandlerThread:17465 [system_info.py:__init__():31] System info init
+2022-12-18 14:49:16,311 DEBUG   HandlerThread:17465 [system_info.py:__init__():46] System info init done
+2022-12-18 14:49:16,312 INFO    HandlerThread:17465 [system_monitor.py:start():150] Starting system monitor
+2022-12-18 14:49:16,312 INFO    SystemMonitor:17465 [system_monitor.py:_start():116] Starting system asset monitoring threads
+2022-12-18 14:49:16,312 INFO    HandlerThread:17465 [system_monitor.py:probe():171] Collecting system info
+2022-12-18 14:49:16,312 INFO    SystemMonitor:17465 [interfaces.py:start():168] Started cpu
+2022-12-18 14:49:16,312 INFO    SystemMonitor:17465 [interfaces.py:start():168] Started disk
+2022-12-18 14:49:16,314 INFO    SystemMonitor:17465 [interfaces.py:start():168] Started gpuapple
+2022-12-18 14:49:16,315 DEBUG   HandlerThread:17465 [system_info.py:probe():195] Probing system
+2022-12-18 14:49:16,315 INFO    SystemMonitor:17465 [interfaces.py:start():168] Started memory
+2022-12-18 14:49:16,316 INFO    SystemMonitor:17465 [interfaces.py:start():168] Started network
+2022-12-18 14:49:16,321 DEBUG   HandlerThread:17465 [system_info.py:_probe_git():180] Probing git
+2022-12-18 14:49:16,336 DEBUG   HandlerThread:17465 [system_info.py:_probe_git():188] Probing git done
+2022-12-18 14:49:16,336 DEBUG   HandlerThread:17465 [system_info.py:probe():241] Probing system done
+2022-12-18 14:49:16,336 DEBUG   HandlerThread:17465 [system_monitor.py:probe():180] {'os': 'macOS-13.0.1-arm64-arm-64bit', 'python': '3.10.8', 'heartbeatAt': '2022-12-18T13:49:16.315190', 'startedAt': '2022-12-18T13:49:15.625564', 'docker': None, 'cuda': None, 'args': (), 'state': 'running', 'program': '/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/ppo_continuous.py', 'codePath': 'PPO/ppo_torch/ppo_continuous.py', 'git': {'remote': 'git@github.com:bkunters/ml-explorer-drone.git', 'commit': 'cceeea52952f41455e9e8d1636dfc3880d252d8f'}, 'email': 'janina.alica.mattes@gmail.com', 'root': '/Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone', 'host': 'Janinas-MacBook-Pro.local', 'username': 'janinaalicamattes', 'executable': '/Users/janinaalicamattes/miniforge3/envs/pytorch-ppo-research/bin/python', 'cpu_count': 8, 'cpu_count_logical': 8, 'disk': {'total': 460.4317207336426, 'used': 8.218402862548828}, 'gpuapple': {'type': 'arm', 'vendor': 'Apple'}, 'memory': {'total': 16.0}}
+2022-12-18 14:49:16,336 INFO    HandlerThread:17465 [system_monitor.py:probe():181] Finished collecting system info
+2022-12-18 14:49:16,336 INFO    HandlerThread:17465 [system_monitor.py:probe():184] Publishing system info
+2022-12-18 14:49:16,336 DEBUG   HandlerThread:17465 [system_info.py:_save_pip():51] Saving list of pip packages installed into the current environment
+2022-12-18 14:49:16,337 DEBUG   HandlerThread:17465 [system_info.py:_save_pip():67] Saving pip packages done
+2022-12-18 14:49:16,337 DEBUG   HandlerThread:17465 [system_info.py:_save_conda():74] Saving list of conda packages installed into the current environment
+2022-12-18 14:49:17,145 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/requirements.txt
+2022-12-18 14:49:17,145 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:17,145 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/conda-environment.yaml
+2022-12-18 14:49:17,647 DEBUG   HandlerThread:17465 [system_info.py:_save_conda():86] Saving conda packages done
+2022-12-18 14:49:17,647 DEBUG   HandlerThread:17465 [system_info.py:_save_code():89] Saving code
+2022-12-18 14:49:17,654 DEBUG   HandlerThread:17465 [system_info.py:_save_code():110] Saving code done
+2022-12-18 14:49:17,654 DEBUG   HandlerThread:17465 [system_info.py:_save_patches():127] Saving git patches
+2022-12-18 14:49:17,903 DEBUG   HandlerThread:17465 [system_info.py:_save_patches():169] Saving git patches done
+2022-12-18 14:49:17,904 INFO    HandlerThread:17465 [system_monitor.py:probe():186] Finished publishing system info
+2022-12-18 14:49:17,929 DEBUG   SenderThread:17465 [sender.py:send():303] send: files
+2022-12-18 14:49:17,929 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-metadata.json with policy now
+2022-12-18 14:49:17,929 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file code/PPO/ppo_torch/ppo_continuous.py with policy now
+2022-12-18 14:49:17,930 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file diff.patch with policy now
+2022-12-18 14:49:17,930 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file upstream_diff_4f24a110ccf50a5ebeb9ace5cc3ba21025944c69.patch with policy now
+2022-12-18 14:49:17,933 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: stop_status
+2022-12-18 14:49:17,933 DEBUG   SenderThread:17465 [sender.py:send_request():317] send_request: stop_status
+2022-12-18 14:49:18,149 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/conda-environment.yaml
+2022-12-18 14:49:18,149 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/diff.patch
+2022-12-18 14:49:18,149 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/code/PPO/ppo_torch/ppo_continuous.py
+2022-12-18 14:49:18,149 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-metadata.json
+2022-12-18 14:49:18,149 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/upstream_diff_4f24a110ccf50a5ebeb9ace5cc3ba21025944c69.patch
+2022-12-18 14:49:18,149 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/code/PPO
+2022-12-18 14:49:18,149 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/code
+2022-12-18 14:49:18,149 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/code/PPO/ppo_torch
+2022-12-18 14:49:18,378 DEBUG   SenderThread:17465 [sender.py:send():303] send: telemetry
+2022-12-18 14:49:18,380 INFO    Thread-17 :17465 [upload_job.py:push():123] Skipped uploading /var/folders/4h/v0fwv1zs4596mmdvwj516k840000gn/T/tmptdu3jy5swandb/3t4woks6-code/PPO/ppo_torch/ppo_continuous.py
+2022-12-18 14:49:18,821 INFO    Thread-16 :17465 [upload_job.py:push():143] Uploaded file /var/folders/4h/v0fwv1zs4596mmdvwj516k840000gn/T/tmptdu3jy5swandb/3vu81ye1-wandb-metadata.json
+2022-12-18 14:49:18,862 INFO    Thread-19 :17465 [upload_job.py:push():143] Uploaded file /var/folders/4h/v0fwv1zs4596mmdvwj516k840000gn/T/tmptdu3jy5swandb/gfheq5dk-upstream_diff_4f24a110ccf50a5ebeb9ace5cc3ba21025944c69.patch
+2022-12-18 14:49:18,964 INFO    Thread-18 :17465 [upload_job.py:push():143] Uploaded file /var/folders/4h/v0fwv1zs4596mmdvwj516k840000gn/T/tmptdu3jy5swandb/21g1sutd-diff.patch
+2022-12-18 14:49:19,152 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_created():275] file/dir created: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:21,160 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:22,061 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:22,062 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:22,062 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:22,062 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:22,169 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:22,173 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:22,173 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:22,173 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:22,178 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:23,542 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:23,548 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:23,548 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:23,549 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:23,792 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:23,793 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:23,793 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:23,793 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:24,174 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:25,137 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:25,138 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:25,138 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:25,146 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:25,183 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:25,183 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:25,218 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:25,218 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:25,218 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:25,219 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:26,504 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:26,505 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:26,505 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:26,505 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:26,590 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:26,590 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:26,590 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:26,591 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:27,191 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:27,191 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:27,977 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:27,977 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:27,978 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:27,986 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:28,197 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:28,230 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:28,230 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:28,230 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:28,231 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:29,199 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:29,199 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:31,210 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:32,078 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:32,079 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:32,079 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:32,079 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:32,215 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:32,268 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:32,268 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:32,268 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:32,269 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:33,384 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: stop_status
+2022-12-18 14:49:33,385 DEBUG   SenderThread:17465 [sender.py:send_request():317] send_request: stop_status
+2022-12-18 14:49:34,959 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:34,960 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:34,960 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:34,960 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:35,084 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:35,085 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:35,085 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:35,085 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:35,231 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:35,231 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:36,725 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:36,725 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:36,725 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:36,734 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:36,834 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:36,834 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:36,835 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:36,835 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:37,242 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:37,242 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:39,248 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:40,103 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:40,103 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:40,104 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:40,105 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:40,213 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:40,214 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:40,214 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:40,214 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:40,253 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:41,285 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:41,285 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:41,285 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:41,286 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:41,358 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:41,359 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:41,359 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:41,360 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:42,262 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:42,537 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:42,537 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:42,537 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:42,538 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:42,602 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:42,602 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:42,602 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:42,603 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
+2022-12-18 14:49:43,264 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/wandb-summary.json
+2022-12-18 14:49:43,264 INFO    Thread-13 :17465 [dir_watcher.py:_on_file_modified():292] file/dir modified: /Volumes/Work Disk Janina Mattes/DEV/University/ASP/ml-explorer-drone/PPO/ppo_torch/wandb/run-20221218_144915-17ezvbe9/files/output.log
+2022-12-18 14:49:43,702 DEBUG   HandlerThread:17465 [handler.py:handle_request():139] handle_request: partial_history
+2022-12-18 14:49:43,702 DEBUG   SenderThread:17465 [sender.py:send():303] send: history
+2022-12-18 14:49:43,702 DEBUG   SenderThread:17465 [sender.py:send():303] send: summary
+2022-12-18 14:49:43,703 INFO    SenderThread:17465 [sender.py:_save_file():1171] saving file wandb-summary.json with policy end
