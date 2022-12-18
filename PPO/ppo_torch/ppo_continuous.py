@@ -68,13 +68,13 @@ class PolicyNet(Net):
         self.layer1 = layer_init(nn.Linear(in_dim, 64))
         self.layer2 = layer_init(nn.Linear(64, 64))
         self.layer3 = layer_init(nn.Linear(64, out_dim), std=0.01)
-        self.tanh = nn.Tanh()
+        self.relu = nn.ReLU()
 
     def forward(self, obs):
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float)
-        x = self.tanh(self.layer1(obs))
-        x = self.tanh(self.layer2(x))
+        x = self.relu(self.layer1(obs))
+        x = self.relu(self.layer2(x))
         out = self.layer3(x) # head has linear activation (continuous space)
         return out
     
