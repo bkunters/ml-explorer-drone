@@ -417,7 +417,7 @@ if __name__ == '__main__':
     gamma = 0.99                    # discount factor
     adam_epsilon = 1e-5             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8
     epsilon = 0.2                   # clipping factor
-    env_name = 'Pendulum-v1'        # name of OpenAI gym environment other: 'MountainCarContinuous-v0'
+    env_name = 'MountainCarContinuous-v0'       # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
     seed = 42                       # seed gym, env, torch, numpy 
     
     # setup for torch save models and rendering
