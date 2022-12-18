@@ -107,9 +107,7 @@ class PPO_PolicyGradient:
         lr_v=1e-3,
         gamma=0.99,
         epsilon=0.22,
-        adam_eps=1e-5,
-        render=1,
-        save_model=10) -> None:
+        adam_eps=1e-5) -> None:
         
         # hyperparams
         self.in_dim = in_dim
@@ -126,8 +124,6 @@ class PPO_PolicyGradient:
 
         # environment
         self.env = env
-        self.render_steps = render
-        self.save_model = save_model
 
         # keep track of rewards per episode
         self.ep_returns = deque(maxlen=max_trajectory_size)
@@ -220,7 +216,7 @@ class PPO_PolicyGradient:
             # to keep rollout size fixed and episodes independent
             for ep_t in range(0, self.max_trajectory_size):
                 # render gym envs
-                if render and ep_t % self.render_steps == 0:
+                if render:
                     self.env.render(mode='human')
                 
                 step += 1 
@@ -303,7 +299,8 @@ class PPO_PolicyGradient:
             # STEP 5: compute advantage estimates A_t at timestep t_step
             values, _ = self.get_values(obs, actions)
             advantages = self.advantage_estimate(cum_return, values.detach())
-
+            
+            # TODO: fix frequency of the updates --> improve the algorithm 
             for _ in range(self.num_epochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs = self.get_values(obs, actions)
@@ -323,7 +320,7 @@ class PPO_PolicyGradient:
                 'train/value loss': value_loss})
             
             # store model in checkpoints
-            if steps % self.save_model == 0:
+            if mean_reward > best_mean_reward:
                 env_name = env.unwrapped.spec.id
                 torch.save({
                     'epoch': steps,
@@ -399,13 +396,10 @@ def test():
 
 if __name__ == '__main__':
     
-    """ Classic control gym environments docu: https://www.gymlibrary.dev/environments/classic_control/
-    """
     if not os.path.exists(MODEL_PATH):
         os.makedirs(MODEL_PATH)
 
     args = arg_parser()
-    
     # Hyperparameter
     unity_file_name = ''            # name of unity environment
     total_steps = 30000000          # time steps to train agent
@@ -417,12 +411,9 @@ if __name__ == '__main__':
     gamma = 0.99                    # discount factor
     adam_epsilon = 1e-5             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8
     epsilon = 0.2                   # clipping factor
-    env_name = 'Pendulum-v1'        # name of OpenAI gym environment other: 'MountainCarContinuous-v0'
+    env_name = 'Pendulum-v1'        # name of OpenAI gym environment
     seed = 42                       # seed gym, env, torch, numpy 
-    
-    # setup for torch save models and rendering
-    render_steps = 10
-    save_steps = 10
+    #'CartPole-v1' 'Pendulum-v1', 'MountainCar-v0'
 
     # Configure logger
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -492,9 +483,7 @@ if __name__ == '__main__':
                 lr_v=learning_rate_v,
                 gamma=gamma,
                 epsilon=epsilon,
-                adam_eps=adam_epsilon,
-                render=render_steps,
-                save_model=save_steps)
+                adam_eps=adam_epsilon)
     
     # run training for a total amount of steps
     agent.learn()
