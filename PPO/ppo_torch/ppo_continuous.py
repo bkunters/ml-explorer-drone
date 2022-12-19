@@ -102,7 +102,7 @@ class PPO_PolicyGradient:
         total_steps,
         max_trajectory_size,
         trajectory_iterations,
-        num_epochs=5,
+        noptepochs=5,
         lr_p=1e-3,
         lr_v=1e-3,
         gamma=0.99,
@@ -117,7 +117,7 @@ class PPO_PolicyGradient:
         self.total_steps = total_steps
         self.max_trajectory_size = max_trajectory_size
         self.trajectory_iterations = trajectory_iterations
-        self.num_epochs = num_epochs
+        self.noptepochs = noptepochs
         self.lr_p = lr_p
         self.lr_v = lr_v
         self.gamma = gamma
@@ -304,17 +304,19 @@ class PPO_PolicyGradient:
             values, _ = self.get_values(obs, actions)
             advantages = self.advantage_estimate(cum_return, values.detach())
 
-            for _ in range(self.num_epochs):
+            # update network params 
+            for _ in range(self.noptepochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs = self.get_values(obs, actions)
                 policy_loss, value_loss = self.train(values, cum_return, advantages, log_probs, curr_log_probs, self.epsilon)
 
+            logging.info('\n')
             logging.info('###########################################')
             logging.info(f"Mean return: {mean_reward}")
             logging.info(f"Policy loss: {policy_loss}")
             logging.info(f"Value loss: {value_loss}")
             logging.info(f"Time step: {steps}")
-            logging.info('###########################################\n')
+            logging.info('###########################################')
             
             # logging for monitoring in W&B
             wandb.log({
@@ -368,12 +370,14 @@ def arg_parser():
 def make_env(env_id='Pendulum-v1', seed=42):
     # TODO: Needs to be parallized for parallel simulation
     env = gym.make(env_id)
+    
     # gym wrapper
-    # env = gym.wrappers.ClipAction(env)
-    # env = gym.wrappers.NormalizeObservation(env)
-    # env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-    # env = gym.wrappers.NormalizeReward(env)
-    # env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    env = gym.wrappers.ClipAction(env)
+    env = gym.wrappers.NormalizeObservation(env)
+    env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+    env = gym.wrappers.NormalizeReward(env)
+    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    
     # seed env for reproducability
     env.seed(seed)
     env.action_space.seed(seed)
@@ -385,7 +389,9 @@ def make_vec_env(num_env=1):
     pass
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    """Initialize the hidden layers with orthogonal initialization"""
+    """Initialize the hidden layers with orthogonal initialization
+        Engstrom, Ilyas, et al., (2020)
+    """
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
@@ -399,7 +405,8 @@ def test():
 
 if __name__ == '__main__':
     
-    """ Classic control gym environments docu: https://www.gymlibrary.dev/environments/classic_control/
+    """ Classic control gym environments 
+        Find docu: https://www.gymlibrary.dev/environments/classic_control/
     """
     if not os.path.exists(MODEL_PATH):
         os.makedirs(MODEL_PATH)
@@ -411,13 +418,13 @@ if __name__ == '__main__':
     total_steps = 30000000          # time steps to train agent
     max_trajectory_size = 1000      # max number of trajectory samples to be sampled per time step. 
     trajectory_iterations = 4600    # number of batches of episodes
-    num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
+    noptepochs = 5                  # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4          # learning rate for policy network
     learning_rate_v = 1e-3          # learning rate for value network
     gamma = 0.99                    # discount factor
-    adam_epsilon = 1e-5             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8
+    adam_epsilon = 1e-8             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
     epsilon = 0.2                   # clipping factor
-    env_name = 'MountainCarContinuous-v0'       # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
+    env_name = 'Pendulum-v1'       # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
     seed = 42                       # seed gym, env, torch, numpy 
     
     # setup for torch save models and rendering
@@ -465,7 +472,7 @@ if __name__ == '__main__':
             'total number of steps': total_steps,
             'max sampled trajectories': max_trajectory_size,
             'batches per episode': trajectory_iterations,
-            'number of epochs for update': num_epochs,
+            'number of epochs for update': noptepochs,
             'input layer size': obs_dim,
             'output layer size': act_dim,
             'learning rate (policy net)': learning_rate_p,
@@ -487,7 +494,7 @@ if __name__ == '__main__':
                 total_steps=total_steps,
                 max_trajectory_size=max_trajectory_size,
                 trajectory_iterations=trajectory_iterations,
-                num_epochs=num_epochs,
+                noptepochs=noptepochs,
                 lr_p=learning_rate_p,
                 lr_v=learning_rate_v,
                 gamma=gamma,
