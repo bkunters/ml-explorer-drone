@@ -99,7 +99,9 @@ class PolicyNet(Net):
 
 
 class PPO_PolicyGradient:
-    """ Autonomous agent using Proximal Policy Optimization (PPO) as policy gradient method.
+    """ Proximal Policy Optimization (PPO) is an online policy gradient method.
+        As an online policy method it updates the policy and then discards the experience (no replay buffer).
+        Thus the agent does well in environments with dense reward signals.
         The clipped objective function in PPO allows to keep the policy close to the policy 
         that was used to sample the data resulting in a more stable training. 
     """
@@ -186,7 +188,8 @@ class PPO_PolicyGradient:
     def cummulative_reward(self, batch_rewards):
         """Calculate cummulative rewards with discount factor gamma."""
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
-        # G(t) = R(t) + gamma * R(t-1)
+        # advantage function: δt = G(t) + γV (st+1) − V (st)
+        # return value: G(t) = R(t) + gamma * R(t-1)
         cum_rewards = []
         for rewards in reversed(batch_rewards): # reversed order
             discounted_reward = 0
@@ -195,8 +198,30 @@ class PPO_PolicyGradient:
                 cum_rewards.insert(0, discounted_reward)
         return torch.tensor(cum_rewards, dtype=torch.float)
 
+    def generalized_advantage_estimate(self, batch_rewards, values, done, normalized=True):
+        """ Calculate advantage as a weighted average of A_t
+            - advantage A_t gives information if this action is bettern than another at a state
+            - done (Tensor): boolean flag for end of episode.
+        """
+        # general advantage estimage: https://nn.labml.ai/rl/ppo/gae.html
+        advantages = []
+        last_value = values[-1] # V(s_t+1)
+        for rewards in reversed(batch_rewards):
+            prev_advantage = 0
+            for i in reversed(range(self.max_trajectory_size)):
+                mask = 1.0 - done[i] # mask if episode completed after step i # TODO: Request done - true/false? 
+                last_value = last_value * mask
+                prev_advantage = prev_advantage * mask
+                delta = rewards[i] + self.gamma * last_value - values[i]
+                prev_advantage = delta + self.gamma * self.lambda_ * prev_advantage
+                advantages.insert(0, prev_advantage) # we need to reverse it again
+                last_value = values[i]
+        if normalized:
+            advantages = self.normalize_adv(advantages)
+        return advantages
+
     def advantage_estimate(self, returns, values, normalized=True):
-        """ Simplest advantage calculation
+        """ Advantage calculation
             - advantage A_t gives information if this action is bettern than another at a state
         """
         # STEP 5: compute advantage estimates A_t at step t
@@ -204,27 +229,6 @@ class PPO_PolicyGradient:
         if normalized:
             advantages = self.normalize_adv(advantages)
         return advantages
-    
-    def generalized_advantage_estimate(self, returns, values, normalized=True):
-        """ Calculate advantage as a weighted average of A_t
-            - advantage A_t gives information if this action is bettern than another at a state
-        """
-        # general advantage estimage: https://nn.labml.ai/rl/ppo/gae.html
-        last_advantage = 0
-        advantages = []
-        last_value = values[-1] # V(s_t+1)
-        for i in reversed(range(returns)):
-            mask = 0.5
-            last_value = last_value * mask
-            last_advantage = last_advantage * mask
-            delta = returns[i] + self.gamma * last_value - values[i]
-            last_advantage = delta + self.gamma * self.lambda_ * last_advantage
-            advantages.inser(0, last_advantage)
-            last_value = values[i]
-
-        if normalized:
-            advantages = self.normalize_adv(advantages)
-        pass
     
     def normalize_adv(self, advantages):
         return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
@@ -241,6 +245,7 @@ class PPO_PolicyGradient:
         trajectory_obs = []
         trajectory_actions = []
         trajectory_action_probs = []
+        trajectory_dones = []
         batch_rewards = []
         batch_lens = []
 
@@ -274,6 +279,7 @@ class PPO_PolicyGradient:
                 trajectory_actions.append(action)
                 trajectory_action_probs.append(log_probability)
                 ep_rewards.append(reward)
+                trajectory_dones.append(done)
                     
                 obs = __obs
 
@@ -288,22 +294,26 @@ class PPO_PolicyGradient:
         obs = torch.tensor(np.array(trajectory_obs), dtype=torch.float)
         actions = torch.tensor(np.array(trajectory_actions), dtype=torch.float)
         log_probs = torch.tensor(np.array(trajectory_action_probs), dtype=torch.float)
+        dones = torch.tensor(np.array(trajectory_dones), dtype=torch.float)
         
         # STEP 4: Calculate cummulated reward
         cummulative_reward = self.cummulative_reward(batch_rewards)
         cummulative_reward = torch.tensor(np.array(cummulative_reward), dtype=torch.float)
 
         # Calculate the stats
+        cum_rews = [np.sum(ep_rews) for ep_rews in batch_rewards]
         mean_ep_lens = np.mean(batch_lens)
-        mean_ep_rews = np.mean([np.sum(ep_rews) for ep_rews in batch_rewards])
-
+        mean_ep_rews = np.mean(cum_rews)
+        std_ep_rews = np.std(cum_rews) # calculate standard deviation (spred of distribution)
+        
         # Log stats
         wandb.log({
             "train/mean episode length": mean_ep_lens,
             "train/mean episode returns": mean_ep_rews,
+            "train/std episode returns": std_ep_rews,
         })
 
-        return obs, actions, log_probs, cummulative_reward, batch_lens, mean_ep_rews
+        return obs, actions, log_probs, dones, cummulative_reward, batch_lens, mean_ep_rews
                 
 
     def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
@@ -331,20 +341,19 @@ class PPO_PolicyGradient:
         
             # Collect trajectory
             # STEP 3-4: simulate and collect trajectories --> the following values are all per batch
-            obs, actions, log_probs, cum_return, batch_lens, mean_reward = self.collect_rollout(n_step=self.trajectory_iterations)
+            obs, actions, log_probs, dones, cum_return, batch_lens, mean_reward = self.collect_rollout(n_step=self.trajectory_iterations)
             
-            # timesteps for batch collection
+            # timesteps simulated so far for batch collection
             steps += np.sum(batch_lens)
 
             # STEP 5: compute advantage estimates A_t at timestep t_step
             values, _ , _ = self.get_values(obs, actions)
             advantages = self.advantage_estimate(cum_return, values.detach())
-
+            # advantages = self.generalized_advantage_estimate(batch_rewards, values.detach(), dones)
             # update network params 
             for _ in range(self.noptepochs):
                 # STEP 6-7: calculate loss and update weights
-                values, curr_log_probs, entropy = self.get_values(obs, actions)
-                entropy_bonus = np.mean(entropy)
+                values, curr_log_probs, _ = self.get_values(obs, actions)
                 policy_loss, value_loss = self.train(values, cum_return, advantages, log_probs, curr_log_probs, self.epsilon)
 
             logging.info('\n')
@@ -358,7 +367,7 @@ class PPO_PolicyGradient:
             
             # logging for monitoring in W&B
             wandb.log({
-                'train/step': steps,
+                'train/episode': steps,
                 'train/policy loss': policy_loss,
                 'train/value loss': value_loss})
             
@@ -424,11 +433,11 @@ def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=42):
     return env
 
 def make_vec_env(num_env=1):
-    """Create a vectorized environment for parallelized training."""
+    """ Create a vectorized environment for parallelized training."""
     pass
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    """Initialize the hidden layers with orthogonal initialization
+    """ Initialize the hidden layers with orthogonal initialization
         Engstrom, Ilyas, et al., (2020)
     """
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -460,12 +469,12 @@ if __name__ == '__main__':
     noptepochs = 5                  # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4          # learning rate for policy network
     learning_rate_v = 1e-3          # learning rate for value network
+    gae_lambda = 0.95               # trajectory discount for the general advantage estimation (GAE)
     gamma = 0.99                    # discount factor
     adam_epsilon = 1e-8             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
     epsilon = 0.2                   # clipping factor
-    value_loss_coef = 0.0           # TODO: Dummy value
-    entropy_bonus_coef = 0.0        # TODO: Dummy value
     env_name = 'Pendulum-v1'        # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
+    env_number = 8                  # number of actors
     seed = 42                       # seed gym, env, torch, numpy 
     
     # setup for torch save models and rendering
@@ -524,7 +533,7 @@ if __name__ == '__main__':
             'seerd': seed
         },
     name=f"{env_name}__{current_time}",
-    # monitor_gym=True,
+    monitor_gym=True,
     save_code=True,
     )
 
