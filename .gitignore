@@ -9,6 +9,7 @@ ppo_impl/venv/*
 
 # Visual Studio cache directory
 .vs/
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -35,5 +36,5 @@ Assets/ML-Agents/Timers/
 sysinfo.txt
 
 # Monitoring
-wandb/*
-
+*/wandb/*
+ppo_impl/ppo_torch/wandb/*

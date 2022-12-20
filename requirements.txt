@@ -64,3 +64,13 @@ wrapt==1.14.1
 
 # Logging
 wandb
+
+# hyperparam tuning
+optuna
+
+# drone PyBullet gym
+pybullet
+
+# RL llibraries
+rllib
+stable-baselines3
