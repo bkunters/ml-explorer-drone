@@ -79,11 +79,18 @@ class PolicyNet(Net):
         return out
     
     def loss(self, advantages, batch_log_probs, curr_log_probs, clip_eps=0.2):
-        """Make the clipped surrogate objective function to compute policy loss."""
+        """ Make the clipped surrogate objective function to compute policy loss.
+                - The ratio is clipped to be close to 1. 
+                - The clipping ensures that the update will not be too large so that training is more stable.
+                - The minimum is taken, so that the gradient will pull π_new towards π_OLD 
+                  if the ratio is not between 1-ϵ and 1+ϵ.
+        """
         ratio = torch.exp(curr_log_probs - batch_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
         clip_1 = ratio * advantages
         clip_2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * advantages
         policy_loss = (-torch.min(clip_1, clip_2)).mean() # negative as Adam mins loss, but we want to max it
+        # calc clip frac
+        self.clip_fraction = (abs((ratio - 1.0)) > clip_eps).to(torch.float).mean()
         return policy_loss
 
 
@@ -92,9 +99,14 @@ class PolicyNet(Net):
 
 
 class PPO_PolicyGradient:
-    """Autonomous agent using Proximal Policy Optimization 
-        as policy gradient method.
+    """ Autonomous agent using Proximal Policy Optimization (PPO) as policy gradient method.
+        The clipped objective function in PPO allows to keep the policy close to the policy 
+        that was used to sample the data resulting in a more stable training. 
     """
+    # Further reading
+    # PPO experiments: https://nn.labml.ai/rl/ppo/experiment.html
+    # PPO explained: https://huggingface.co/blog/deep-rl-ppo
+
     def __init__(self, 
         env, 
         in_dim, 
@@ -133,8 +145,8 @@ class PPO_PolicyGradient:
         self.ep_returns = deque(maxlen=max_trajectory_size)
 
         # add net for actor and critic
-        self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor)
-        self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic)
+        self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor) - (policy-based method) "How the agent behaves"
+        self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic) -  (value-based method) "How good the action taken is."
 
         # add optimizer for actor and critic
         self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p, eps=self.adam_eps) # Setup Policy Network (Actor) optimizer
@@ -162,7 +174,8 @@ class PPO_PolicyGradient:
         values = self.value_net(obs).squeeze()
         dist = self.get_continuous_policy(obs)
         log_prob = dist.log_prob(actions)
-        return values, log_prob
+        entropy = dist.entropy()
+        return values, log_prob, entropy
 
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
@@ -175,7 +188,7 @@ class PPO_PolicyGradient:
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
         # G(t) = R(t) + gamma * R(t-1)
         cum_rewards = []
-        for rewards in reversed(batch_rewards):
+        for rewards in reversed(batch_rewards): # reversed order
             discounted_reward = 0
             for reward in reversed(rewards):
                 discounted_reward = reward + (self.gamma * discounted_reward)
@@ -183,16 +196,39 @@ class PPO_PolicyGradient:
         return torch.tensor(cum_rewards, dtype=torch.float)
 
     def advantage_estimate(self, returns, values, normalized=True):
-        """Simplest advantage calculation"""
+        """ Simplest advantage calculation
+            - advantage A_t gives information if this action is bettern than another at a state
+        """
         # STEP 5: compute advantage estimates A_t at step t
         advantages = returns - values
         if normalized:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            advantages = self.normalize_adv(advantages)
         return advantages
     
-    def generalized_advantage_estimate(self):
+    def generalized_advantage_estimate(self, returns, values, normalized=True):
+        """ Calculate advantage as a weighted average of A_t
+            - advantage A_t gives information if this action is bettern than another at a state
+        """
+        # general advantage estimage: https://nn.labml.ai/rl/ppo/gae.html
+        last_advantage = 0
+        advantages = []
+        last_value = values[-1] # V(s_t+1)
+        for i in reversed(range(returns)):
+            mask = 0.5
+            last_value = last_value * mask
+            last_advantage = last_advantage * mask
+            delta = returns[i] + self.gamma * last_value - values[i]
+            last_advantage = delta + self.gamma * self.lambda_ * last_advantage
+            advantages.inser(0, last_advantage)
+            last_value = values[i]
+
+        if normalized:
+            advantages = self.normalize_adv(advantages)
         pass
     
+    def normalize_adv(self, advantages):
+        return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        
     def finish_episode(self):
         pass 
 
@@ -289,7 +325,7 @@ class PPO_PolicyGradient:
 
     def learn(self):
         """"""
-        steps, best_mean_reward = 0, 0
+        steps = 0
 
         while steps < self.total_steps:
         
@@ -301,22 +337,24 @@ class PPO_PolicyGradient:
             steps += np.sum(batch_lens)
 
             # STEP 5: compute advantage estimates A_t at timestep t_step
-            values, _ = self.get_values(obs, actions)
+            values, _ , _ = self.get_values(obs, actions)
             advantages = self.advantage_estimate(cum_return, values.detach())
 
             # update network params 
             for _ in range(self.noptepochs):
                 # STEP 6-7: calculate loss and update weights
-                values, curr_log_probs = self.get_values(obs, actions)
+                values, curr_log_probs, entropy = self.get_values(obs, actions)
+                entropy_bonus = np.mean(entropy)
                 policy_loss, value_loss = self.train(values, cum_return, advantages, log_probs, curr_log_probs, self.epsilon)
 
             logging.info('\n')
             logging.info('###########################################')
             logging.info(f"Mean return: {mean_reward}")
             logging.info(f"Policy loss: {policy_loss}")
-            logging.info(f"Value loss: {value_loss}")
-            logging.info(f"Time step: {steps}")
+            logging.info(f"Value loss:  {value_loss}")
+            logging.info(f"Time step:   {steps}")
             logging.info('###########################################')
+            logging.info('\n')
             
             # logging for monitoring in W&B
             wandb.log({
@@ -367,16 +405,17 @@ def arg_parser():
     args = parser.parse_args()
     return args
 
-def make_env(env_id='Pendulum-v1', seed=42):
+def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=42):
     # TODO: Needs to be parallized for parallel simulation
     env = gym.make(env_id)
     
     # gym wrapper
-    env = gym.wrappers.ClipAction(env)
-    env = gym.wrappers.NormalizeObservation(env)
-    env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-    env = gym.wrappers.NormalizeReward(env)
-    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    if gym_wrappers:
+        env = gym.wrappers.ClipAction(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
     
     # seed env for reproducability
     env.seed(seed)
@@ -424,7 +463,9 @@ if __name__ == '__main__':
     gamma = 0.99                    # discount factor
     adam_epsilon = 1e-8             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
     epsilon = 0.2                   # clipping factor
-    env_name = 'Pendulum-v1'       # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
+    value_loss_coef = 0.0           # TODO: Dummy value
+    entropy_bonus_coef = 0.0        # TODO: Dummy value
+    env_name = 'Pendulum-v1'        # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
     seed = 42                       # seed gym, env, torch, numpy 
     
     # setup for torch save models and rendering

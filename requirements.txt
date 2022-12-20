@@ -64,3 +64,6 @@ wrapt==1.14.1
 
 # Logging
 wandb
+
+# hyperparam tuning
+optuna

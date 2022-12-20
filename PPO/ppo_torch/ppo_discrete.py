@@ -1,3 +1,4 @@
+from collections import deque
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -41,7 +42,7 @@ class Net(nn.Module):
 
 class ValueNet(Net):
     """Setup Value Network (Critic) optimizer"""
-    def __init__(self, in_dim, out_dim) -> None:
+    def __init__(self, in_dim: int, out_dim: int) -> None:
         super(ValueNet, self).__init__()
         self.layer1 = layer_init(nn.Linear(in_dim, 64))
         self.layer2 = layer_init(nn.Linear(64, 64))
@@ -56,36 +57,42 @@ class ValueNet(Net):
         out = self.layer3(x) # linear
         return out
     
-    def loss(self, obs, rewards):
+    def loss(self, values, rewards):
         """Objective function defined by mean-squared error"""
-        values = self(obs).squeeze()
         #return 0.5 * ((rewards - values)**2).mean() # MSE loss
         return nn.MSELoss()(values, rewards)
 
 class PolicyNet(Net):
     """Setup Policy Network (Actor)"""
-    def __init__(self, in_dim, out_dim) -> None:
+    def __init__(self, in_dim: int, out_dim: int) -> None:
         super(PolicyNet, self).__init__()
         self.layer1 = layer_init(nn.Linear(in_dim, 64))
         self.layer2 = layer_init(nn.Linear(64, 64))
         self.layer3 = layer_init(nn.Linear(64, out_dim), std=0.01)
-        self.tanh = nn.Tanh()
+        self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, obs):
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float)
-        x = self.tanh(self.layer1(obs))
-        x = self.tanh(self.layer2(x))
+        x = self.relu(self.layer1(obs))
+        x = self.relu(self.layer2(x))
         out = self.softmax(self.layer3(x)) # sofmax activation with discrete
         return out
     
     def loss(self, advantages, batch_log_probs, curr_log_probs, clip_eps=0.2):
-        """Make the clipped surrogate objective function to compute policy loss."""
+        """ Make the clipped surrogate objective function to compute policy loss.
+                - The ratio is clipped to be close to 1. 
+                - The clipping ensures that the update will not be too large so that training is more stable.
+                - The minimum is taken, so that the gradient will pull π_new towards π_OLD 
+                  if the ratio is not between 1-ϵ and 1+ϵ.
+        """
         ratio = torch.exp(curr_log_probs - batch_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
         clip_1 = ratio * advantages
-        clip_2 = torch.clamp(ratio, min=1.0 - clip_eps, max=1.0 + clip_eps) * advantages
-        policy_loss = (-torch.min(clip_1, clip_2)).mean() # negative as Adam mins loss - we want to max it
+        clip_2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * advantages
+        policy_loss = (-torch.min(clip_1, clip_2)).mean() # negative as Adam mins loss, but we want to max it
+        # calculate the clip frac
+        # self.clip_fraction = (abs((ratio - 1.0)) > clip_eps).to(torch.float).mean()
         return policy_loss
 
 
@@ -94,28 +101,34 @@ class PolicyNet(Net):
 
 
 class PPO_PolicyGradient:
-
+    """ Autonomous agent using Proximal Policy Optimization (PPO) as policy gradient method.
+        The clipped objective function in PPO allows to keep the policy close to the policy 
+        that was used to sample the data resulting in a more stable training. 
+    """
+    # PPO experiments: https://nn.labml.ai/rl/ppo/experiment.html
     def __init__(self, 
         env, 
         in_dim, 
         out_dim,
-        total_timesteps,
+        total_steps,
         max_trajectory_size,
         trajectory_iterations,
-        num_epochs=5,
+        noptepochs=5,
         lr_p=1e-3,
         lr_v=1e-3,
         gamma=0.99,
         epsilon=0.22,
-        adam_eps=1e-5) -> None:
+        adam_eps=1e-5,
+        render=1,
+        save_model=10) -> None:
         
         # hyperparams
         self.in_dim = in_dim
         self.out_dim = out_dim
-        self.total_timesteps = total_timesteps
+        self.total_steps = total_steps
         self.max_trajectory_size = max_trajectory_size
         self.trajectory_iterations = trajectory_iterations
-        self.num_epochs = num_epochs
+        self.noptepochs = noptepochs
         self.lr_p = lr_p
         self.lr_v = lr_v
         self.gamma = gamma
@@ -124,10 +137,15 @@ class PPO_PolicyGradient:
 
         # environment
         self.env = env
+        self.render_steps = render
+        self.save_model = save_model
+
+        # keep track of rewards per episode
+        self.ep_returns = deque(maxlen=max_trajectory_size)
 
         # add net for actor and critic
-        self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor)
-        self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic)
+        self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor) - (policy-based method) "How the agent behaves"
+        self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic) -  (value-based method) "How good the action taken is."
 
         # add optimizer for actor and critic
         self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p, eps=self.adam_eps) # Setup Policy Network (Actor) optimizer
@@ -152,108 +170,146 @@ class PPO_PolicyGradient:
         values = self.value_net(obs).squeeze()
         dist = self.get_discrete_policy(obs)
         log_prob = dist.log_prob(actions)
-        return values, log_prob
+        entropy = dist.entropy()
+        return values, log_prob, entropy
 
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
-        action_dist = self.get_discrete_policy(obs)
+        action_dist = self.get_discrete_policy(obs) 
         action, log_prob, entropy = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
 
-    def cummulative_reward(self, rewards): # TODO: FIX 
+    def cummulative_reward(self, batch_rewards):
+        """Calculate cummulative rewards with discount factor gamma."""
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
         # G(t) = R(t) + gamma * R(t-1)
         cum_rewards = []
-        discounted_reward = 0
-        for reward in reversed(rewards):
-            discounted_reward = reward + (self.gamma * discounted_reward)
-            cum_rewards.append(discounted_reward)
-        return cum_rewards
+        for rewards in reversed(batch_rewards): # reversed order
+            discounted_reward = 0
+            for reward in reversed(rewards):
+                discounted_reward = reward + (self.gamma * discounted_reward)
+                cum_rewards.insert(0, discounted_reward)
+        return torch.tensor(cum_rewards, dtype=torch.float)
 
-    def advantage_estimate(self, rewards, values, normalized=True): # TODO: FIX 
+    def advantage_estimate(self, returns, values, normalized=True):
         """Simplest advantage calculation"""
-        # STEP 5: compute advantage estimates A_t
-        advantages = rewards - values
+        # STEP 5: compute advantage estimates A_t at step t
+        advantages = returns - values
         if normalized:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            advantages = self.normalize_adv(advantages)
         return advantages
     
-    def generalized_advantage_estimate(self):
-        pass
+    def generalized_advantage_estimate(self, returns, values, normalized=True):
+        """Calculate advantage as a weighted average of A_t"""
+        # general advantage estimage: https://nn.labml.ai/rl/ppo/gae.html
+        last_advantage = 0
+        advantages = []
+        last_value = values[-1] # V(s_t+1)
+        for i in reversed(range(returns)):
+            mask = 0.5
+            last_value = last_value * mask
+            last_advantage = last_advantage * mask
+            delta = returns[i] + self.gamma * last_value - values[i]
+            last_advantage = delta + self.gamma * self.lambda_ * last_advantage
+            advantages.inser(0, last_advantage)
+            last_value = values[i]
 
-    def collect_rollout(self, sum_rewards, num_episodes, num_passed_timesteps, render=True):
-        """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
+        if normalized:
+            advantages = self.normalize_adv(advantages)
+        pass
     
+    def normalize_adv(self, advantages):
+        return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        
+    def finish_episode(self):
+        pass 
+
+    def collect_rollout(self, n_step=1, render=True):
+        """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
+        
+        step, ep_rewards = 0, []
+
+        # collect trajectories
         trajectory_obs = []
         trajectory_actions = []
         trajectory_action_probs = []
-        trajectory_rewards = []
-        trajectory_rewards_to_go = []
+        batch_rewards = []
+        batch_lens = []
 
-        next_obs = self.env.reset()
-        total_reward, num_batches, mean_reward = 0, 0, 0
-
+        # Run Monte Carlo simulation for n timesteps per batch
         logging.info("Collecting batch trajectories...")
-        for iteration in range(0, trajectory_iterations):
+        while step < n_step:
+            
+            # rewards collected per episode
+            ep_rewards, done = [], False 
+            obs = self.env.reset()
 
-            # render gym env
-            if render:
-                self.env.render(mode='human')
-
-            while True:
-                # Run an episode 
-                num_batches += 1
-                num_passed_timesteps += 1
-
-                # collect observation and get action with log probs
-                trajectory_obs.append(next_obs)
-                # action logic
-                with torch.no_grad():
-                    action, log_probability, _ = self.step(next_obs)
+            # Run episode for a fixed amount of timesteps
+            # to keep rollout size fixed and episodes independent
+            for ep_t in range(0, self.max_trajectory_size):
+                # render gym envs
+                if render and ep_t % self.render_steps == 0:
+                    self.env.render(mode='human')
                 
+                step += 1 
+
+                # action logic 
+                # sampled via policy which defines behavioral strategy of an agent
+                action, log_probability, _ = self.step(obs)
+                        
                 # STEP 3: collecting set of trajectories D_k by running action 
                 # that was sampled from policy in environment
-                next_obs, reward, done, info = self.env.step(action)
+                __obs, reward, done, _ = self.env.step(action)
 
-                total_reward += reward
-                sum_rewards += reward
-
-                # tracking of values
+                # collection of trajectories in batches
+                trajectory_obs.append(obs)
                 trajectory_actions.append(action)
                 trajectory_action_probs.append(log_probability)
-                trajectory_rewards.append(reward)
-                
+                ep_rewards.append(reward)
+                    
+                obs = __obs
+
                 # break out of loop if episode is terminated
                 if done:
-                    next_obs = self.env.reset()
-                    # calculate stats and reset all values
-                    num_episodes += 1
-                    total_reward, trajectory_values = 0, []
                     break
             
-        # STEP 4: Calculate rewards to go R_t
-        mean_reward = sum_rewards / num_episodes
-        logging.info(f"Mean cumulative reward: {mean_reward}")
-        trajectory_rewards_to_go = self.cummulative_reward(np.array(trajectory_rewards))
-        
-        return torch.tensor(np.array(trajectory_obs), dtype=torch.float), \
-                torch.tensor(np.array(trajectory_actions), dtype=torch.float), \
-                torch.tensor(np.array(trajectory_action_probs), dtype=torch.float), \
-                torch.tensor(np.array(trajectory_rewards_to_go), dtype=torch.float), \
-                mean_reward, \
-                num_passed_timesteps
+            batch_lens.append(ep_t + 1) # as we started at 0
+            batch_rewards.append(ep_rewards)
 
-    def train(self, obs, rewards, advantages, batch_log_probs, curr_log_probs, clip_eps):
+        # convert trajectories to torch tensors
+        obs = torch.tensor(np.array(trajectory_obs), dtype=torch.float)
+        actions = torch.tensor(np.array(trajectory_actions), dtype=torch.float)
+        log_probs = torch.tensor(np.array(trajectory_action_probs), dtype=torch.float)
+        
+        # STEP 4: Calculate cummulated reward
+        cummulative_reward = self.cummulative_reward(batch_rewards)
+        cummulative_reward = torch.tensor(np.array(cummulative_reward), dtype=torch.float)
+
+        # Calculate the stats
+        mean_ep_lens = np.mean(batch_lens)
+        mean_ep_rews = np.mean([np.sum(ep_rews) for ep_rews in batch_rewards])
+
+        # Log stats
+        wandb.log({
+            "train/mean episode length": mean_ep_lens,
+            "train/mean episode returns": mean_ep_rews,
+        })
+
+        return obs, actions, log_probs, cummulative_reward, batch_lens, mean_ep_rews
+                
+
+    def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
         """Calculate loss and update weights of both networks."""
+        logging.info("Updating network parameter...")
         # loss of the policy network
         self.policy_net_optim.zero_grad() # reset optimizer
-        policy_loss = self.policy_net.loss(advantages, batch_log_probs, curr_log_probs, clip_eps)
+        policy_loss = self.policy_net.loss(advantages, batch_log_probs, curr_log_probs, epsilon)
         policy_loss.backward() # backpropagation
         self.policy_net_optim.step() # single optimization step (updates parameter)
 
         # loss of the value network
         self.value_net_optim.zero_grad() # reset optimizer
-        value_loss = self.value_net.loss(obs, rewards)
+        value_loss = self.value_net.loss(values, returns) 
         value_loss.backward()
         self.value_net_optim.step()
 
@@ -261,56 +317,53 @@ class PPO_PolicyGradient:
 
     def learn(self):
         """"""
-        # logging info 
-        logging.info('Updating the neural network...')
-        num_passed_timesteps, mean_reward, sum_rewards, best_mean_reward, num_episodes, t_simulated = 0, 0, 0, 0, 1, 0 # number of timesteps simulated
-        
-        for t_step in range(self.total_timesteps):
-            policy_loss, value_loss = 0, 0
-            # Collect trajectory
-            # STEP 3-4: imulate and collect trajectories --> the following values are all per batch
-            batch_obs, batch_actions, batch_a_log_probs, batch_rewards2go, mean_reward, num_passed_timesteps = self.collect_rollout(sum_rewards, num_episodes, num_passed_timesteps)
-            
-            values = self.value_net(batch_obs).squeeze()
-            # STEP 5: compute advantage estimates A_t at timestep t_step
-            advantages = self.advantage_estimate(batch_rewards2go, values.detach()) # TODO: FIX - do use mean reward, not rewards2go
-            
-            # reset
-            sum_rewards = 0
+        steps = 0
 
-            # loop for network update
-            for epoch in range(self.num_epochs):
-                _, curr_v_log_probs = self.get_values(batch_obs, batch_actions)
-                # STEP 6-7: calculate loss and update weights
-                policy_loss, value_loss = self.train(batch_obs, \
-                    batch_rewards2go, advantages, batch_log_probs=batch_a_log_probs, \
-                    curr_log_probs=curr_v_log_probs, clip_eps=self.epsilon)
+        while steps < self.total_steps:
+        
+            # Collect trajectory
+            # STEP 3-4: simulate and collect trajectories --> the following values are all per batch
+            obs, actions, log_probs, cum_return, batch_lens, mean_reward = self.collect_rollout(n_step=self.trajectory_iterations)
             
+            # timesteps for batch collection
+            steps += np.sum(batch_lens)
+
+            # STEP 5: compute advantage estimates A_t at timestep t_step
+            values, _ , _ = self.get_values(obs, actions)
+            advantages = self.advantage_estimate(cum_return, values.detach())
+
+            # update network params 
+            for _ in range(self.noptepochs):
+                # STEP 6-7: calculate loss and update weights
+                values, curr_log_probs, _ = self.get_values(obs, actions)
+                policy_loss, value_loss = self.train(values, cum_return, advantages, log_probs, curr_log_probs, self.epsilon)
+
+            logging.info('\n')
             logging.info('###########################################')
-            logging.info(f"Step: {t_step}, Policy loss: {policy_loss}")
-            logging.info(f"Step: {t_step}, Value loss: {value_loss}")
-            logging.info(f"Total time steps: {num_passed_timesteps}")
-            logging.info('###########################################\n')
+            logging.info(f"Mean return: {mean_reward}")
+            logging.info(f"Policy loss: {policy_loss}")
+            logging.info(f"Value loss:  {value_loss}")
+            logging.info(f"Time step:   {steps}")
+            logging.info('###########################################')
+            logging.info('\n')
             
             # logging for monitoring in W&B
             wandb.log({
-                'time/time steps': num_passed_timesteps,
-                'loss/policy loss': policy_loss,
-                'loss/value loss': value_loss,
-                'reward/cummulative reward': batch_rewards2go,
-                'reward/mean reward': mean_reward})
+                'train/step': steps,
+                'train/policy loss': policy_loss,
+                'train/value loss': value_loss})
             
             # store model in checkpoints
-            if mean_reward > best_mean_reward:
+            if steps % self.save_model == 0:
                 env_name = env.unwrapped.spec.id
                 torch.save({
-                    'epoch': epoch,
+                    'epoch': steps,
                     'model_state_dict': self.policy_net.state_dict(),
                     'optimizer_state_dict': self.policy_net_optim.state_dict(),
                     'loss': policy_loss,
                     }, f'{MODEL_PATH}{env_name}__policyNet')
                 torch.save({
-                    'epoch': epoch,
+                    'epoch': steps,
                     'model_state_dict': self.value_net.state_dict(),
                     'optimizer_state_dict': self.value_net_optim.state_dict(),
                     'loss': policy_loss,
@@ -341,20 +394,20 @@ def arg_parser():
     
     # Parse arguments if they are given
     args = parser.parse_args()
-    # calculate batch and minibatch sizes
-    args.batch_size = int(args.num_envs * args.num_steps)
-    args.minibatch_size = int(args.batch_size // args.num_minibatches)
     return args
 
-def make_env(env_id='CartPole-v1', seed=42):
+def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=42):
     # TODO: Needs to be parallized for parallel simulation
     env = gym.make(env_id)
+    
     # gym wrapper
-    # env = gym.wrappers.ClipAction(env)
-    # env = gym.wrappers.NormalizeObservation(env)
-    # env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-    # env = gym.wrappers.NormalizeReward(env)
-    # env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    if gym_wrappers:
+        env = gym.wrappers.ClipAction(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    
     # seed env for reproducability
     env.seed(seed)
     env.action_space.seed(seed)
@@ -366,7 +419,9 @@ def make_vec_env(num_env=1):
     pass
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    """Initialize the hidden layers with orthogonal initialization"""
+    """Initialize the hidden layers with orthogonal initialization
+        Engstrom, Ilyas, et al., (2020)
+    """
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
@@ -380,24 +435,33 @@ def test():
 
 if __name__ == '__main__':
     
+    """ Classic control gym environments 
+        Find docu: https://www.gymlibrary.dev/environments/classic_control/
+    """
     if not os.path.exists(MODEL_PATH):
         os.makedirs(MODEL_PATH)
 
     args = arg_parser()
+    
     # Hyperparameter
     unity_file_name = ''            # name of unity environment
-    total_timesteps = 1000          # Total number of epochs to run the training
-    max_trajectory_size = 10000     # max number of trajectory samples to be sampled per time step. 
-    trajectory_iterations = 10      # number of batches of episodes
-    num_epochs = 5                  # Number of epochs per time step to optimize the neural networks
-    learning_rate_p = 1e-3          # learning rate for policy network
+    total_steps = 30000000          # time steps to train agent
+    max_trajectory_size = 1000      # max number of trajectory samples to be sampled per time step. 
+    trajectory_iterations = 4600    # number of batches of episodes
+    noptepochs = 5                  # Number of epochs per time step to optimize the neural networks
+    learning_rate_p = 1e-4          # learning rate for policy network
     learning_rate_v = 1e-3          # learning rate for value network
     gamma = 0.99                    # discount factor
-    adam_epsilon = 1e-5             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8
+    adam_epsilon = 1e-8             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
     epsilon = 0.2                   # clipping factor
-    env_name = 'CartPole-v1'        # name of OpenAI gym environment
+    value_loss_coef = 0.0           # TODO: Dummy value
+    entropy_bonus_coef = 0.0        # TODO: Dummy value
+    env_name = 'CartPole-v1'        # name of OpenAI gym environment other: 'CartPole-v1' , 'LunarLander-v2'
     seed = 42                       # seed gym, env, torch, numpy 
-    #'CartPole-v1' 'Pendulum-v1', 'MountainCar-v0'
+    
+    # setup for torch save models and rendering
+    render_steps = 10
+    save_steps = 10
 
     # Configure logger
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -421,7 +485,7 @@ if __name__ == '__main__':
     logging.info(f'env action space: {act_shape}')
     
     obs_dim = obs_shape[0] 
-    act_dim = 2 # at CartPole
+    act_dim = 2 #act_shape[0] - 2 at CartPole
 
     logging.info(f'env observation dim: {obs_dim}')
     logging.info(f'env action dim: {act_dim}')
@@ -437,17 +501,18 @@ if __name__ == '__main__':
     entity='drone-mechanics',
     sync_tensorboard=True,
     config={ # stores hyperparams in job
-            'total number of epochs': total_timesteps,
+            'total number of steps': total_steps,
             'max sampled trajectories': max_trajectory_size,
             'batches per episode': trajectory_iterations,
-            'number of epochs for update': num_epochs,
+            'number of epochs for update': noptepochs,
             'input layer size': obs_dim,
             'output layer size': act_dim,
             'learning rate (policy net)': learning_rate_p,
             'learning rate (value net)': learning_rate_v,
             'epsilon (adam optimizer)': adam_epsilon,
             'gamma (discount)': gamma,
-            'epsilon (clipping)': epsilon
+            'epsilon (clipping)': epsilon,
+            'seerd': seed
         },
     name=f"{env_name}__{current_time}",
     # monitor_gym=True,
@@ -458,19 +523,22 @@ if __name__ == '__main__':
                 env, 
                 in_dim=obs_dim, 
                 out_dim=act_dim,
-                total_timesteps=total_timesteps,
+                total_steps=total_steps,
                 max_trajectory_size=max_trajectory_size,
                 trajectory_iterations=trajectory_iterations,
-                num_epochs=num_epochs,
+                noptepochs=noptepochs,
                 lr_p=learning_rate_p,
                 lr_v=learning_rate_v,
                 gamma=gamma,
                 epsilon=epsilon,
-                adam_eps=adam_epsilon)
+                adam_eps=adam_epsilon,
+                render=render_steps,
+                save_model=save_steps)
     
-    # run training
+    # run training for a total amount of steps
     agent.learn()
     logging.info('### Done ###')
+
     # cleanup 
     env.close()
     wandb.run.finish() if wandb and wandb.run else None
