@@ -1,0 +1,1 @@
+{"train/mean episode length": 204.2608695652174, "train/mean episode returns": -208.61052309054745, "train/std episode returns": 35.91714981566597, "_timestamp": 1671573909.304993, "_runtime": 73.11485600471497, "_step": 47, "train/episode": 113071, "train/policy loss": -6.217457212187583e-06, "train/value loss": 1609.9659423828125}
