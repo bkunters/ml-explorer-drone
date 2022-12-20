@@ -67,3 +67,10 @@ wandb
 
 # hyperparam tuning
 optuna
+
+# drone PyBullet gym
+pybullet
+
+# RL llibraries
+rllib
+stable-baselines3
