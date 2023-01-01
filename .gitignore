@@ -38,3 +38,10 @@ sysinfo.txt
 # Monitoring
 */wandb/*
 ppo_impl/ppo_torch/wandb/*
+
+# Checkpoints
+# IPython notebook checkpoints
+.ipynb_checkpoints
+
+# models
+*.pth
