@@ -4,11 +4,9 @@ from torch import nn
 import torch.nn.functional as F
 from torch.optim import Adam
 from torch.distributions import MultivariateNormal
-from torch.distributions import Categorical
-from torch.utils.tensorboard import SummaryWriter
 from distutils.util import strtobool
 import numpy as np
-import datetime
+from datetime import datetime
 import gym
 import os
 
@@ -21,7 +19,13 @@ import sys
 # monitoring/logging ML
 import wandb
 
+from wrapper.stats_logger import CSVWriter
+
+# Paths and other constants
 MODEL_PATH = './models/'
+LOG_PATH = './log/'
+
+CURR_DATE = datetime.today().strftime('%Y-%m-%d')
 
 ####################
 ####### TODO #######
@@ -90,7 +94,7 @@ class PolicyNet(Net):
         clip_2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * advantages
         policy_loss = (-torch.min(clip_1, clip_2)).mean() # negative as Adam mins loss, but we want to max it
         # calc clip frac
-        self.clip_fraction = (abs((ratio - 1.0)) > clip_eps).to(torch.float).mean()
+        # self.clip_fraction = (abs((ratio - 1.0)) > clip_eps).to(torch.float).mean()
         return policy_loss
 
 
@@ -119,11 +123,13 @@ class PPO_PolicyGradient:
         noptepochs=5,
         lr_p=1e-3,
         lr_v=1e-3,
+        gae_lambda=0.95,
         gamma=0.99,
         epsilon=0.22,
         adam_eps=1e-5,
         render=1,
-        save_model=10) -> None:
+        save_model=10,
+        csv_writer=None) -> None:
         
         # hyperparams
         self.in_dim = in_dim
@@ -137,6 +143,7 @@ class PPO_PolicyGradient:
         self.gamma = gamma
         self.epsilon = epsilon
         self.adam_eps = adam_eps
+        self.gae_lambda = gae_lambda
 
         # environment
         self.env = env
@@ -145,6 +152,8 @@ class PPO_PolicyGradient:
 
         # keep track of rewards per episode
         self.ep_returns = deque(maxlen=max_trajectory_size)
+        self.csv_writer = csv_writer
+        self.stats_data = {'mean episodic length': [], 'mean episodic rewards': [], 'timestep': []}
 
         # add net for actor and critic
         self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor) - (policy-based method) "How the agent behaves"
@@ -179,57 +188,138 @@ class PPO_PolicyGradient:
         entropy = dist.entropy()
         return values, log_prob, entropy
 
+    def get_value(self, obs):
+        return self.value_net(obs).squeeze()
+
     def step(self, obs):
         """ Given an observation, get action and probabilities from policy network (actor)"""
         action_dist = self.get_continuous_policy(obs) 
         action, log_prob, entropy = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
 
-    def cummulative_reward(self, batch_rewards):
+    def cummulative_return(self, batch_rewards, normalized=False):
         """Calculate cummulative rewards with discount factor gamma."""
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
-        # advantage function: δt = G(t) + γV (st+1) − V (st)
         # return value: G(t) = R(t) + gamma * R(t-1)
-        cum_rewards = []
+        cum_returns = []
         for rewards in reversed(batch_rewards): # reversed order
             discounted_reward = 0
             for reward in reversed(rewards):
                 discounted_reward = reward + (self.gamma * discounted_reward)
-                cum_rewards.insert(0, discounted_reward)
-        return torch.tensor(cum_rewards, dtype=torch.float)
+                cum_returns.insert(0, discounted_reward) # reverse it again
+        if normalized:
+            cum_returns = (cum_returns - cum_returns.mean()) / cum_returns.std()
+        return torch.tensor(cum_returns, dtype=torch.float)
 
-    def generalized_advantage_estimate(self, batch_rewards, values, done, normalized=True):
+    def generalized_advantage_estimate_3(self, batch_rewards, values, dones, normalized=True):
         """ Calculate advantage as a weighted average of A_t
-            - advantage A_t gives information if this action is bettern than another at a state
-            - done (Tensor): boolean flag for end of episode.
+                - advantage measures if an action is better or worse than the policy's default behavior
+                - GAE allows to balance bias and variance through a weighted average of A_t
+
+                - gamma (dicount factor): allows reduce variance by downweighting rewards that correspond to delayed effects
+                - done (Tensor): boolean flag for end of episode. TODO: Q&A
         """
-        # general advantage estimage: https://nn.labml.ai/rl/ppo/gae.html
+        # general advantage estimage paper: https://arxiv.org/pdf/1506.02438.pdf
+        # general advantage estimage other: https://nn.labml.ai/rl/ppo/gae.html
+
         advantages = []
-        last_value = values[-1] # V(s_t+1)
-        for rewards in reversed(batch_rewards):
+        returns = []
+        for rewards in reversed(batch_rewards): # reversed order
             prev_advantage = 0
-            for i in reversed(range(self.max_trajectory_size)):
-                mask = 1.0 - done[i] # mask if episode completed after step i # TODO: Request done - true/false? 
+            discounted_reward = 0
+            last_value = values[-1] # V(s_t+1)
+            for i in reversed(range(len(rewards))):
+                # TODO: Q&A handling of special cases GAE(γ, 0) and GAE(γ, 1)
+                # bei Vetorisierung, bei kurzen Episoden (done flag)
+                # mask if episode completed after step i 
+                mask = 1.0 - dones[i] 
                 last_value = last_value * mask
                 prev_advantage = prev_advantage * mask
-                delta = rewards[i] + self.gamma * last_value - values[i]
-                prev_advantage = delta + self.gamma * self.lambda_ * prev_advantage
-                advantages.insert(0, prev_advantage) # we need to reverse it again
+
+                # TD residual of V with discount gamma
+                # δ_t = − V(s_t) + r_t + γ * V(s_t+1)
+                # TODO: Delta Könnte als advantage ausreichen, r - v könnte ausreichen
+                delta = - values[i] + rewards[i] + (self.gamma * last_value)
+                # discounted sum of Bellman residual term
+                # A_t = δ_t + γ * λ * A(t+1)
+                prev_advantage = delta + self.gamma * self.gae_lambda * prev_advantage
+                discounted_reward = rewards[i] + (self.gamma * discounted_reward)
+                returns.insert(0, discounted_reward) # reverse it again
+                advantages.insert(0, prev_advantage) # reverse it again
+                # store current value as V(s_t+1)
                 last_value = values[i]
+        advantages = np.array(advantages)
+        if normalized:
+            advantages = self.normalize_adv(advantages)
+        return torch.tensor(np.array(advantages), dtype=torch.float), torch.tensor(np.array(returns), dtype=torch.float)
+
+
+    def advantage_estimate(self, next_obs, obs, batch_rewards, dones, normalized=True):
+        """Calculating advantage estimate using TD error.
+            - done: only get reward at end of episode, not disounted next state value
+        """
+        advantages = []
+        returns = []
+        
+        for rewards in reversed(batch_rewards): # reversed order
+            discounted_return = 0
+            for i in reversed(range(len(rewards))):
+                mask = (1 - dones[i])
+                discounted_return = rewards[i] + (self.gamma * discounted_return)
+                advantage = discounted_return + (mask * self.gamma *  self.get_value(next_obs[i])) - self.get_value(obs[i])
+                advantages.insert(0, advantage)
+                returns.insert(0, discounted_return)
+        advantages = np.array(advantages)
+        if normalized:
+            advantages = self.normalize_adv(advantages)
+        return torch.tensor(np.array(advantages), dtype=torch.float), torch.tensor(np.array(returns), dtype=torch.float)
+
+    def generalized_advantage_estimate_1(self, returns, values, normalized=True):
+        """ Generalized Advantage Estimate calculation
+            - GAE defines advantage as a weighted average of A_t
+            - advantage measures if an action is better or worse than the policy's default behavior
+            - want to find the maximum Advantage representing the benefit of choosing a specific action
+        """
+        # STEP 5: compute advantage estimates A_t at step t
+        advantages = returns - values # delta = r - v
         if normalized:
             advantages = self.normalize_adv(advantages)
         return advantages
 
-    def advantage_estimate(self, returns, values, normalized=True):
-        """ Advantage calculation
-            - advantage A_t gives information if this action is bettern than another at a state
+    def generalized_advantage_estimate_2(self, obs, next_obs, batch_rewards, dones, normalized=True):
+        """ Generalized Advantage Estimate calculation
+            - GAE defines advantage as a weighted average of A_t
+            - advantage measures if an action is better or worse than the policy's default behavior
+            - want to find the maximum Advantage representing the benefit of choosing a specific action
         """
-        # STEP 5: compute advantage estimates A_t at step t
-        advantages = returns - values
+        # general advantage estimage paper: https://arxiv.org/pdf/1506.02438.pdf
+        # general advantage estimage other: https://nn.labml.ai/rl/ppo/gae.html
+
+        s_values = self.get_value(obs).detach().numpy()
+        ns_values = self.get_value(next_obs).detach().numpy()
+        advantages = []
+        returns = []
+
+        # STEP 4: Calculate cummulated reward
+        for rewards in reversed(batch_rewards):
+            prev_advantage = 0
+            returns_current = ns_values[-1]  # V(s_t+1)
+            for i in reversed(range(len(rewards))):
+                # STEP 5: compute advantage estimates A_t at step t
+                mask = (1.0 - dones[i])
+                gamma = self.gamma * mask
+                td_error = rewards[i] + gamma * ns_values[i] - s_values[i]
+                # A_t = δ_t + γ * λ * A(t+1)
+                prev_advantage = td_error + gamma * self.gae_lambda * prev_advantage
+                returns_current = rewards[i] + gamma * returns_current
+                # reverse it again
+                returns.insert(0, returns_current)
+                advantages.insert(0, prev_advantage)
+        advantages = np.array(advantages)
         if normalized:
             advantages = self.normalize_adv(advantages)
-        return advantages
-    
+        return torch.tensor(np.array(advantages), dtype=torch.float), torch.tensor(np.array(returns), dtype=torch.float)
+
     def normalize_adv(self, advantages):
         return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         
@@ -239,10 +329,11 @@ class PPO_PolicyGradient:
     def collect_rollout(self, n_step=1, render=True):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
         
-        step, ep_rewards = 0, []
+        step, trajectory_rewards = 0, []
 
         # collect trajectories
         trajectory_obs = []
+        trajectory_nextobs = []
         trajectory_actions = []
         trajectory_action_probs = []
         trajectory_dones = []
@@ -254,7 +345,7 @@ class PPO_PolicyGradient:
         while step < n_step:
             
             # rewards collected per episode
-            ep_rewards, done = [], False 
+            trajectory_rewards, done = [], False 
             obs = self.env.reset()
 
             # Run episode for a fixed amount of timesteps
@@ -276,9 +367,10 @@ class PPO_PolicyGradient:
 
                 # collection of trajectories in batches
                 trajectory_obs.append(obs)
+                trajectory_nextobs.append(__obs)
                 trajectory_actions.append(action)
                 trajectory_action_probs.append(log_probability)
-                ep_rewards.append(reward)
+                trajectory_rewards.append(reward)
                 trajectory_dones.append(done)
                     
                 obs = __obs
@@ -288,32 +380,17 @@ class PPO_PolicyGradient:
                     break
             
             batch_lens.append(ep_t + 1) # as we started at 0
-            batch_rewards.append(ep_rewards)
+            batch_rewards.append(trajectory_rewards)
 
         # convert trajectories to torch tensors
         obs = torch.tensor(np.array(trajectory_obs), dtype=torch.float)
+        next_obs = torch.tensor(np.array(trajectory_nextobs), dtype=torch.float)
         actions = torch.tensor(np.array(trajectory_actions), dtype=torch.float)
         log_probs = torch.tensor(np.array(trajectory_action_probs), dtype=torch.float)
         dones = torch.tensor(np.array(trajectory_dones), dtype=torch.float)
-        
-        # STEP 4: Calculate cummulated reward
-        cummulative_reward = self.cummulative_reward(batch_rewards)
-        cummulative_reward = torch.tensor(np.array(cummulative_reward), dtype=torch.float)
+        rewards = batch_rewards
 
-        # Calculate the stats
-        cum_rews = [np.sum(ep_rews) for ep_rews in batch_rewards]
-        mean_ep_lens = np.mean(batch_lens)
-        mean_ep_rews = np.mean(cum_rews)
-        std_ep_rews = np.std(cum_rews) # calculate standard deviation (spred of distribution)
-        
-        # Log stats
-        wandb.log({
-            "train/mean episode length": mean_ep_lens,
-            "train/mean episode returns": mean_ep_rews,
-            "train/std episode returns": std_ep_rews,
-        })
-
-        return obs, actions, log_probs, dones, cummulative_reward, batch_lens, mean_ep_rews
+        return obs, next_obs, actions, log_probs, dones, rewards, batch_lens
                 
 
     def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
@@ -327,7 +404,7 @@ class PPO_PolicyGradient:
 
         # loss of the value network
         self.value_net_optim.zero_grad() # reset optimizer
-        value_loss = self.value_net.loss(values, returns) # TODO: discounted return 
+        value_loss = self.value_net.loss(values, returns)
         value_loss.backward()
         self.value_net_optim.step()
 
@@ -338,39 +415,32 @@ class PPO_PolicyGradient:
         steps = 0
 
         while steps < self.total_steps:
-        
+            policy_losses, value_losses = [], []
             # Collect trajectory
-            # STEP 3-4: simulate and collect trajectories --> the following values are all per batch
-            obs, actions, log_probs, dones, cum_return, batch_lens, mean_reward = self.collect_rollout(n_step=self.trajectory_iterations)
-            
+            # STEP 3: simulate and collect trajectories --> the following values are all per batch
+            obs, next_obs, actions, log_probs, dones, batch_rewards, batch_lens = self.collect_rollout(n_step=self.trajectory_iterations)
+
             # timesteps simulated so far for batch collection
             steps += np.sum(batch_lens)
 
-            # STEP 5: compute advantage estimates A_t at timestep t_step
-            values, _ , _ = self.get_values(obs, actions)
-            advantages = self.advantage_estimate(cum_return, values.detach())
-            # advantages = self.generalized_advantage_estimate(batch_rewards, values.detach(), dones)
+            # STEP 4-5: Calculate cummulated reward and GAE at timestep t_step
+            values, curr_log_probs , _ = self.get_values(obs, actions)
+            # cum_returns = self.cummulative_return(batch_rewards)
+            # advantages = self.advantage_estimate(cum_returns, values.detach())
+            advantages, cum_returns = self.generalized_advantage_estimate_3(batch_rewards, values, dones)
+            #advantages = self.generalized_advantage_estimate_1(cum_returns, values)
+
             # update network params 
             for _ in range(self.noptepochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs, _ = self.get_values(obs, actions)
-                policy_loss, value_loss = self.train(values, cum_return, advantages, log_probs, curr_log_probs, self.epsilon)
+                policy_loss, value_loss = self.train(values, cum_returns, advantages, log_probs, curr_log_probs, self.epsilon)
+                
+                policy_losses.append(policy_loss.detach().numpy())
+                value_losses.append(value_loss.detach().numpy())
 
-            logging.info('\n')
-            logging.info('###########################################')
-            logging.info(f"Mean return: {mean_reward}")
-            logging.info(f"Policy loss: {policy_loss}")
-            logging.info(f"Value loss:  {value_loss}")
-            logging.info(f"Time step:   {steps}")
-            logging.info('###########################################')
-            logging.info('\n')
-            
-            # logging for monitoring in W&B
-            wandb.log({
-                'train/episode': steps,
-                'train/policy loss': policy_loss,
-                'train/value loss': value_loss})
-            
+            self.log_stats(policy_losses, value_losses, cum_returns, batch_lens, steps)
+
             # store model in checkpoints
             if steps % self.save_model == 0:
                 env_name = env.unwrapped.spec.id
@@ -379,14 +449,58 @@ class PPO_PolicyGradient:
                     'model_state_dict': self.policy_net.state_dict(),
                     'optimizer_state_dict': self.policy_net_optim.state_dict(),
                     'loss': policy_loss,
-                    }, f'{MODEL_PATH}{env_name}__policyNet')
+                    }, f'{MODEL_PATH}{env_name}_{CURR_DATE}_policyNet')
                 torch.save({
                     'epoch': steps,
                     'model_state_dict': self.value_net.state_dict(),
                     'optimizer_state_dict': self.value_net_optim.state_dict(),
                     'loss': policy_loss,
-                    }, f'{MODEL_PATH}{env_name}__valueNet')
-                best_mean_reward = mean_reward
+                    }, f'{MODEL_PATH}{env_name}_{CURR_DATE}_valueNet')
+        
+                # Log to CSV
+                if self.csv_writer is not None:
+                    self.csv_writer(self.stats_data)
+                    for value in self.stats_data.values():
+                        del value[:]
+
+
+    def log_stats(self, p_losses, v_losses, batch_return, batch_lens, steps):
+        """Calculate stats and log to W&B, CSV, logger """
+        # calculate stats
+        mean_p_loss = np.mean([np.sum(loss) for loss in p_losses])
+        mean_v_loss = np.mean([np.sum(loss) for loss in v_losses])
+
+        # Calculate the stats of an episode
+        cum_ret = [np.sum(ep_rews) for ep_rews in batch_return]
+        mean_ep_lens = np.mean(batch_lens)
+        mean_ep_rews = np.mean(cum_ret)
+        # calculate standard deviation (spred of distribution)
+        std_ep_rews = np.std(cum_ret)
+
+        # Log stats to CSV file
+        self.stats_data['mean episodic length'].append(mean_ep_lens)
+        self.stats_data['mean episodic rewards'].append(mean_ep_rews)
+        self.stats_data['timestep'].append(steps)
+
+        # Monitoring via W&B
+        wandb.log({
+            'train/timesteps': steps,
+            'train/mean policy loss': mean_p_loss,
+            'train/mean value loss': mean_v_loss,
+            'train/mean episode length': mean_ep_lens,
+            'train/mean episode returns': mean_ep_rews,
+            'train/std episode returns': std_ep_rews,
+        })
+
+        logging.info('\n')
+        logging.info('###########################################')
+        logging.info(f"Mean return:      {mean_ep_rews}")
+        logging.info(f"Mean policy loss: {mean_p_loss}")
+        logging.info(f"Mean value loss:  {mean_v_loss}")
+        logging.info(f"Timestep:         {steps}")
+        logging.info('###########################################')
+        logging.info('\n')
+
 
 ####################
 ####################
@@ -444,6 +558,10 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+def create_path(path: str) -> None:
+    if not os.path.exists(path):
+        os.makedirs(path)
+
 def train():
     # TODO Add Checkpoints to load model 
     pass
@@ -456,17 +574,19 @@ if __name__ == '__main__':
     """ Classic control gym environments 
         Find docu: https://www.gymlibrary.dev/environments/classic_control/
     """
-    if not os.path.exists(MODEL_PATH):
-        os.makedirs(MODEL_PATH)
 
+    # check if path exists otherwise create
+    create_path(MODEL_PATH)
+    create_path(LOG_PATH)
+
+    # parse arguments
     args = arg_parser()
     
     # Hyperparameter
-    unity_file_name = ''            # name of unity environment
-    total_steps = 30000000          # time steps to train agent
+    total_steps = 10_000_000        # time steps regarding batches collected and train agent
     max_trajectory_size = 1000      # max number of trajectory samples to be sampled per time step. 
-    trajectory_iterations = 4600    # number of batches of episodes
-    noptepochs = 5                  # Number of epochs per time step to optimize the neural networks
+    trajectory_iterations = 2408    # number of batches of episodes
+    noptepochs = 12                 # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4          # learning rate for policy network
     learning_rate_v = 1e-3          # learning rate for value network
     gae_lambda = 0.95               # trajectory discount for the general advantage estimation (GAE)
@@ -474,12 +594,12 @@ if __name__ == '__main__':
     adam_epsilon = 1e-8             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
     epsilon = 0.2                   # clipping factor
     env_name = 'Pendulum-v1'        # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
-    env_number = 8                  # number of actors
+    env_number = 1                  # number of actors
     seed = 42                       # seed gym, env, torch, numpy 
     
     # setup for torch save models and rendering
-    render_steps = 10
-    save_steps = 10
+    render_steps = 100
+    save_steps = 100
 
     # Configure logger
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -498,9 +618,14 @@ if __name__ == '__main__':
     # and actions (what goes out?)
     obs_shape = env.observation_space.shape
     act_shape = env.action_space.shape
+    
+    upper_bound = env.action_space.high[0]
+    lower_bound = env.action_space.low[0]
 
     logging.info(f'env observation space: {obs_shape}')
     logging.info(f'env action space: {act_shape}')
+    logging.info(f'env action upper bound: {upper_bound}')
+    logging.info(f'env action lower bound: {lower_bound}')
     
     obs_dim = obs_shape[0] 
     act_dim = act_shape[0] # 2 at CartPole
@@ -511,8 +636,10 @@ if __name__ == '__main__':
     # upper and lower bound describing the values our obs can take
     logging.info(f'upper bound for env observation: {env.observation_space.high}')
     logging.info(f'lower bound for env observation: {env.observation_space.low}')
-    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-   
+
+    # create CSV writer
+    csv_writer = CSVWriter(f"{LOG_PATH}{env_name}_{CURR_DATE}.csv")
+
     # Monitoring with W&B
     wandb.init(
     project=f'drone-mechanics-ppo-OpenAIGym',
@@ -530,12 +657,15 @@ if __name__ == '__main__':
             'epsilon (adam optimizer)': adam_epsilon,
             'gamma (discount)': gamma,
             'epsilon (clipping)': epsilon,
-            'seerd': seed
+            'seed': seed
         },
-    name=f"{env_name}__{current_time}",
+    name=f"exp_name: {env_name}_{CURR_DATE}",
     monitor_gym=True,
     save_code=True,
     )
+
+    # monitor gym
+    wandb.gym.monitor()
 
     agent = PPO_PolicyGradient(
                 env, 
@@ -547,11 +677,13 @@ if __name__ == '__main__':
                 noptepochs=noptepochs,
                 lr_p=learning_rate_p,
                 lr_v=learning_rate_v,
+                gae_lambda = gae_lambda,
                 gamma=gamma,
                 epsilon=epsilon,
                 adam_eps=adam_epsilon,
                 render=render_steps,
-                save_model=save_steps)
+                save_model=save_steps,
+                csv_writer=csv_writer)
     
     # run training for a total amount of steps
     agent.learn()

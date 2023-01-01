@@ -504,7 +504,7 @@ if __name__ == '__main__':
     logging.info(f'env action space: {act_shape}')
     
     obs_dim = obs_shape[0] 
-    act_dim = act_shape[0] # 2 at CartPole
+    act_dim = act_shape[0]
 
     logging.info(f'env observation dim: {obs_dim}')
     logging.info(f'env action dim: {act_dim}')
@@ -531,7 +531,12 @@ if __name__ == '__main__':
             'epsilon (adam optimizer)': adam_epsilon,
             'gamma (discount)': gamma,
             'epsilon (clipping)': epsilon,
-            'seerd': seed
+            'lambda (gae)': gae_lambda,
+            'observations shape': obs_shape,
+            'actions shape': act_shape,
+            'actions dimensions': act_dim,
+            'observations dimensions': obs_dim,
+            'seed': seed,
         },
     name=f"{env_name}__{current_time}",
     monitor_gym=True,
