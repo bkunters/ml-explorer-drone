@@ -45,3 +45,4 @@ ppo_impl/ppo_torch/wandb/*
 
 # models
 *.pth
+wandb/
