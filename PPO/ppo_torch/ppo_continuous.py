@@ -24,6 +24,7 @@ from wrapper.stats_logger import CSVWriter
 # Paths and other constants
 MODEL_PATH = './models/'
 LOG_PATH = './log/'
+VIDEO_PATH = './video/'
 
 CURR_DATE = datetime.today().strftime('%Y-%m-%d')
 
@@ -224,6 +225,7 @@ class PPO_PolicyGradient:
 
         advantages = []
         returns = []
+        values = values.detach().numpy()
         for rewards in reversed(batch_rewards): # reversed order
             prev_advantage = 0
             discounted_reward = 0
@@ -248,10 +250,12 @@ class PPO_PolicyGradient:
                 advantages.insert(0, prev_advantage) # reverse it again
                 # store current value as V(s_t+1)
                 last_value = values[i]
-        advantages = np.array(advantages)
+        advantages = torch.tensor(np.array(advantages), dtype=torch.float)
+        returns = torch.tensor(np.array(returns), dtype=torch.float)
         if normalized:
             advantages = self.normalize_adv(advantages)
-        return torch.tensor(np.array(advantages), dtype=torch.float), torch.tensor(np.array(returns), dtype=torch.float)
+            #returns = self.normalize_ret(returns)
+        return advantages, returns
 
 
     def advantage_estimate(self, next_obs, obs, batch_rewards, dones, normalized=True):
@@ -272,19 +276,29 @@ class PPO_PolicyGradient:
         advantages = np.array(advantages)
         if normalized:
             advantages = self.normalize_adv(advantages)
-        return torch.tensor(np.array(advantages), dtype=torch.float), torch.tensor(np.array(returns), dtype=torch.float)
+        return torch.tensor(advantages, dtype=torch.float), torch.tensor(np.array(returns), dtype=torch.float)
 
-    def generalized_advantage_estimate_1(self, returns, values, normalized=True):
+    def generalized_advantage_estimate_1(self, batch_rewards, values, normalized=True):
         """ Generalized Advantage Estimate calculation
             - GAE defines advantage as a weighted average of A_t
             - advantage measures if an action is better or worse than the policy's default behavior
             - want to find the maximum Advantage representing the benefit of choosing a specific action
         """
         # STEP 5: compute advantage estimates A_t at step t
-        advantages = returns - values # delta = r - v
+        cum_returns = []
+        advantages = []
+        for rewards in reversed(batch_rewards): # reversed order
+            discounted_reward = 0
+            for i in reversed(range(len(rewards))):
+                discounted_reward = rewards[i] + (self.gamma * discounted_reward)
+                advantage = discounted_reward - values[i] # delta = r - v
+                advantages.insert(0, advantage)
+                cum_returns.insert(0, discounted_reward) # reverse it again
+        returns = torch.tensor(np.array(cum_returns), dtype=torch.float)
+        advantages = torch.tensor(np.array(advantages), dtype=torch.float)
         if normalized:
             advantages = self.normalize_adv(advantages)
-        return advantages
+        return advantages, returns
 
     def generalized_advantage_estimate_2(self, obs, next_obs, batch_rewards, dones, normalized=True):
         """ Generalized Advantage Estimate calculation
@@ -322,7 +336,10 @@ class PPO_PolicyGradient:
 
     def normalize_adv(self, advantages):
         return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        
+    
+    def normalize_ret(self, returns):
+        return (returns - returns.mean()) / returns.std()
+
     def finish_episode(self):
         pass 
 
@@ -353,7 +370,7 @@ class PPO_PolicyGradient:
             for ep_t in range(0, self.max_trajectory_size):
                 # render gym envs
                 if render and ep_t % self.render_steps == 0:
-                    self.env.render(mode='human')
+                    self.env.render()
                 
                 step += 1 
 
@@ -424,10 +441,10 @@ class PPO_PolicyGradient:
             steps += np.sum(batch_lens)
 
             # STEP 4-5: Calculate cummulated reward and GAE at timestep t_step
-            values, curr_log_probs , _ = self.get_values(obs, actions)
-            # cum_returns = self.cummulative_return(batch_rewards)
-            # advantages = self.advantage_estimate(cum_returns, values.detach())
-            advantages, cum_returns = self.generalized_advantage_estimate_3(batch_rewards, values, dones)
+            values, _ , _ = self.get_values(obs, actions)
+            cum_returns = self.cummulative_return(batch_rewards)
+            advantages = self.generalized_advantage_estimate_1(cum_returns, values.detach())
+            #advantages, cum_returns = self.generalized_advantage_estimate_3(batch_rewards, values, dones)
             #advantages = self.generalized_advantage_estimate_1(cum_returns, values)
 
             # update network params 
@@ -439,7 +456,7 @@ class PPO_PolicyGradient:
                 policy_losses.append(policy_loss.detach().numpy())
                 value_losses.append(value_loss.detach().numpy())
 
-            self.log_stats(policy_losses, value_losses, cum_returns, batch_lens, steps)
+            self.log_stats(policy_losses, value_losses, batch_rewards, batch_lens, steps)
 
             # store model in checkpoints
             if steps % self.save_model == 0:
@@ -449,13 +466,13 @@ class PPO_PolicyGradient:
                     'model_state_dict': self.policy_net.state_dict(),
                     'optimizer_state_dict': self.policy_net_optim.state_dict(),
                     'loss': policy_loss,
-                    }, f'{MODEL_PATH}{env_name}_{CURR_DATE}_policyNet')
+                    }, f'{MODEL_PATH}{env_name}_{CURR_DATE}_policyNet.pth')
                 torch.save({
                     'epoch': steps,
                     'model_state_dict': self.value_net.state_dict(),
                     'optimizer_state_dict': self.value_net_optim.state_dict(),
-                    'loss': policy_loss,
-                    }, f'{MODEL_PATH}{env_name}_{CURR_DATE}_valueNet')
+                    'loss': value_loss,
+                    }, f'{MODEL_PATH}{env_name}_{CURR_DATE}_valueNet.pth')
         
                 # Log to CSV
                 if self.csv_writer is not None:
@@ -466,6 +483,8 @@ class PPO_PolicyGradient:
 
     def log_stats(self, p_losses, v_losses, batch_return, batch_lens, steps):
         """Calculate stats and log to W&B, CSV, logger """
+        if torch.is_tensor(batch_return):
+            batch_return = batch_return.detach().numpy()
         # calculate stats
         mean_p_loss = np.mean([np.sum(loss) for loss in p_losses])
         mean_v_loss = np.mean([np.sum(loss) for loss in v_losses])
@@ -493,12 +512,11 @@ class PPO_PolicyGradient:
         })
 
         logging.info('\n')
-        logging.info('###########################################')
-        logging.info(f"Mean return:      {mean_ep_rews}")
-        logging.info(f"Mean policy loss: {mean_p_loss}")
-        logging.info(f"Mean value loss:  {mean_v_loss}")
-        logging.info(f"Timestep:         {steps}")
-        logging.info('###########################################')
+        logging.info(f'------------ Episode: {steps} --------------')
+        logging.info(f"Mean return:          {mean_ep_rews}")
+        logging.info(f"Mean policy loss:     {mean_p_loss}")
+        logging.info(f"Mean value loss:      {mean_v_loss}")
+        logging.info('--------------------------------------------')
         logging.info('\n')
 
 
@@ -509,6 +527,12 @@ def arg_parser():
     parser = argparse.ArgumentParser()
     # fmt: off
     parser = argparse.ArgumentParser()
+    parser.add_argument("--video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="if toggled, capture video of run")
+    parser.add_argument("--train", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="if toggled, run model in training mode")
+    parser.add_argument("--test", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="if toggled, run model in testing mode")
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
     parser.add_argument("--gym-id", type=str, default="HalfCheetahBulletEnv-v0",
@@ -562,25 +586,125 @@ def create_path(path: str) -> None:
     if not os.path.exists(path):
         os.makedirs(path)
 
-def train():
-    # TODO Add Checkpoints to load model 
-    pass
+def load_model(path, model):
+    checkpoint = torch.load(path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    return model
 
-def test():
-    pass
+def simulate_rollout(policy_net, env, render=True):
+    # Rollout until user kills process
+	while True:
+		obs = env.reset()
+		done = False
+
+		# number of timesteps so far
+		t = 0
+
+		# Logging data
+		ep_len = 0            # episodic length
+		ep_ret = 0            # episodic return
+
+		while not done:
+			t += 1
+
+			# Render environment if specified, off by default
+			if render:
+				env.render()
+
+			# Query deterministic action from policy and run it
+			action = policy_net(obs).detach().numpy()
+			obs, rew, done, _ = env.step(action)
+
+			# Sum all episodic rewards as we go along
+			ep_ret += rew
+			
+		# Track episodic length
+		ep_len = t
+
+		# returns episodic length and return in this iteration
+		yield ep_len, ep_ret
+
+def _log_summary(ep_len, ep_ret, ep_num):
+
+        # Monitoring via W&B
+        wandb.log({
+            'test/timesteps': ep_num,
+            'test/episode length': ep_len,
+            'test/episode returns': ep_ret
+        })
+
+		# Print logging statements
+        logging.info('\n')
+        logging.info(f'------------ Episode: {ep_num} --------------')
+        logging.info(f"Episodic Length: {ep_len}")
+        logging.info(f"Episodic Return: {ep_ret}")
+        logging.info(f"--------------------------------------------")
+        logging.info('\n')
+
+def train(env, 
+          in_dim, 
+          out_dim, 
+          total_steps, 
+          max_trajectory_size, 
+          trajectory_iterations,
+          noptepochs,
+          learning_rate_p,
+          learning_rate_v,
+          gae_lambda,
+          gamma,
+          epsilon,
+          adam_epsilon,
+          render_steps,
+          save_steps,
+          csv_writer):
+    """Train the policy network (actor) and the value network (critic) with PPO"""
+    agent = PPO_PolicyGradient(
+                env, 
+                in_dim=in_dim, 
+                out_dim=out_dim,
+                total_steps=total_steps,
+                max_trajectory_size=max_trajectory_size,
+                trajectory_iterations=trajectory_iterations,
+                noptepochs=noptepochs,
+                lr_p=learning_rate_p,
+                lr_v=learning_rate_v,
+                gae_lambda = gae_lambda,
+                gamma=gamma,
+                epsilon=epsilon,
+                adam_eps=adam_epsilon,
+                render=render_steps,
+                save_model=save_steps,
+                csv_writer=csv_writer)
+    
+    # run training for a total amount of steps
+    agent.learn()
+
+def test(path, env, in_dim, out_dim, steps=10_000, render=True, log_video=False):
+    """Test the policy network (actor)"""
+    # load model and test it
+    policy_net = PolicyNet(in_dim, out_dim)
+    policy_net = load_model(path, policy_net)
+    
+    for ep_num, (ep_len, ep_ret) in enumerate(simulate_rollout(policy_net, env, render)):
+        _log_summary(ep_len=ep_len, ep_ret=ep_ret, ep_num=ep_num)
+
+        if log_video:
+            wandb.log({"test/video": wandb.Video(VIDEO_PATH, caption='episode: '+str(ep_num-10), fps=4, format="gif"), "step": ep_num})
+
 
 if __name__ == '__main__':
     
     """ Classic control gym environments 
         Find docu: https://www.gymlibrary.dev/environments/classic_control/
     """
+    # parse arguments
+    args = arg_parser()
 
     # check if path exists otherwise create
     create_path(MODEL_PATH)
     create_path(LOG_PATH)
-
-    # parse arguments
-    args = arg_parser()
+    if args.video:
+        create_path(VIDEO_PATH)
     
     # Hyperparameter
     total_steps = 10_000_000        # time steps regarding batches collected and train agent
@@ -598,7 +722,8 @@ if __name__ == '__main__':
     seed = 42                       # seed gym, env, torch, numpy 
     
     # setup for torch save models and rendering
-    render_steps = 100
+    render = True
+    render_steps = 10
     save_steps = 100
 
     # Configure logger
@@ -606,6 +731,8 @@ if __name__ == '__main__':
     
     # seed gym, torch and numpy
     env = make_env(env_name, seed=seed)
+    if args.video:
+        env = gym.wrappers.Monitor(env, VIDEO_PATH, video_callable=lambda x: x%10==0, force=True)
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -667,26 +794,29 @@ if __name__ == '__main__':
     # monitor gym
     wandb.gym.monitor()
 
-    agent = PPO_PolicyGradient(
-                env, 
-                in_dim=obs_dim, 
-                out_dim=act_dim,
-                total_steps=total_steps,
-                max_trajectory_size=max_trajectory_size,
-                trajectory_iterations=trajectory_iterations,
-                noptepochs=noptepochs,
-                lr_p=learning_rate_p,
-                lr_v=learning_rate_v,
-                gae_lambda = gae_lambda,
-                gamma=gamma,
-                epsilon=epsilon,
-                adam_eps=adam_epsilon,
-                render=render_steps,
-                save_model=save_steps,
-                csv_writer=csv_writer)
-    
-    # run training for a total amount of steps
-    agent.learn()
+    if args.train:
+        train(env,
+            in_dim=obs_dim, 
+            out_dim=act_dim,
+            total_steps=total_steps,
+            max_trajectory_size=max_trajectory_size,
+            trajectory_iterations=trajectory_iterations,
+            noptepochs=noptepochs,
+            lr_p=learning_rate_p,
+            lr_v=learning_rate_v,
+            gae_lambda = gae_lambda,
+            gamma=gamma,
+            epsilon=epsilon,
+            adam_eps=adam_epsilon,
+            render=render_steps,
+            save_model=save_steps,
+            csv_writer=csv_writer)
+    elif args.test:
+        PATH = './models/Pendulum-v1_2023-01-01_policyNet.pth'
+        test(PATH, env, in_dim=obs_dim, out_dim=act_dim)
+    else:
+        assert("Needs training (--train) or testing (--test) flag set!")
+
     logging.info('### Done ###')
 
     # cleanup 
