@@ -131,7 +131,7 @@ class PPO_PolicyGradient:
         render=1,
         save_model=10,
         csv_writer=None,
-        log_video=True) -> None:
+        log_video=False) -> None:
         
         # hyperparams
         self.in_dim = in_dim
@@ -151,6 +151,8 @@ class PPO_PolicyGradient:
         self.env = env
         self.render_steps = render
         self.save_model = save_model
+
+        # track video of gym
         self.log_video = log_video
 
         # keep track of rewards per episode
@@ -214,6 +216,12 @@ class PPO_PolicyGradient:
             cum_returns = (cum_returns - cum_returns.mean()) / cum_returns.std()
         return torch.tensor(cum_returns, dtype=torch.float)
 
+    def advantage_estimate_(self, returns, values, normalized=True):
+        advantages = returns - values # delta = r - v
+        if normalized:
+            advantages = self.normalize_adv(advantages)
+        return advantages
+
     def generalized_advantage_estimate_3(self, batch_rewards, values, dones, normalized=True):
         """ Calculate advantage as a weighted average of A_t
                 - advantage measures if an action is better or worse than the policy's default behavior
@@ -256,7 +264,6 @@ class PPO_PolicyGradient:
         returns = torch.tensor(np.array(returns), dtype=torch.float)
         if normalized:
             advantages = self.normalize_adv(advantages)
-            #returns = self.normalize_ret(returns)
         return advantages, returns
 
 
@@ -405,11 +412,10 @@ class PPO_PolicyGradient:
         obs = torch.tensor(np.array(trajectory_obs), dtype=torch.float)
         next_obs = torch.tensor(np.array(trajectory_nextobs), dtype=torch.float)
         actions = torch.tensor(np.array(trajectory_actions), dtype=torch.float)
-        log_probs = torch.tensor(np.array(trajectory_action_probs), dtype=torch.float)
+        action_log_probs = torch.tensor(np.array(trajectory_action_probs), dtype=torch.float)
         dones = torch.tensor(np.array(trajectory_dones), dtype=torch.float)
-        rewards = batch_rewards
 
-        return obs, next_obs, actions, log_probs, dones, rewards, batch_lens
+        return obs, next_obs, actions, action_log_probs, dones, batch_rewards, batch_lens
                 
 
     def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
@@ -437,30 +443,33 @@ class PPO_PolicyGradient:
             policy_losses, value_losses = [], []
             # Collect trajectory
             # STEP 3: simulate and collect trajectories --> the following values are all per batch
-            obs, next_obs, actions, log_probs, dones, batch_rewards, batch_lens = self.collect_rollout(n_step=self.trajectory_iterations)
+            obs, next_obs, actions, batch_log_probs, dones, rewards, batch_lens = self.collect_rollout(n_step=self.trajectory_iterations)
 
             # timesteps simulated so far for batch collection
             steps += np.sum(batch_lens)
 
             # STEP 4-5: Calculate cummulated reward and GAE at timestep t_step
             values, _ , _ = self.get_values(obs, actions)
-            advantages, cum_returns = self.generalized_advantage_estimate_1(batch_rewards, values.detach())
+            cum_returns = self.cummulative_return(rewards)
+            advantages = self.advantage_estimate_(cum_returns, values.detach())
+            # advantages, cum_returns = self.generalized_advantage_estimate_1(rewards, values.detach())
 
             # update network params 
             for _ in range(self.noptepochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs, _ = self.get_values(obs, actions)
-                policy_loss, value_loss = self.train(values, cum_returns, advantages, log_probs, curr_log_probs, self.epsilon)
+                policy_loss, value_loss = self.train(values, cum_returns, advantages, batch_log_probs, curr_log_probs, self.epsilon)
                 
                 policy_losses.append(policy_loss.detach().numpy())
                 value_losses.append(value_loss.detach().numpy())
 
-            self.log_stats(policy_losses, value_losses, batch_rewards, batch_lens, steps)
+            self.log_stats(policy_losses, value_losses, rewards, batch_lens, steps)
 
             # store model in checkpoints
             if steps % self.save_model == 0:
                 env_name = env.unwrapped.spec.id
                 policy_net_name = f'{MODEL_PATH}{env_name}_{CURR_DATE}_policyNet.pth'
+                value_net_name = f'{MODEL_PATH}{env_name}_{CURR_DATE}_valueNet.pth'
                 torch.save({
                     'epoch': steps,
                     'model_state_dict': self.policy_net.state_dict(),
@@ -472,16 +481,11 @@ class PPO_PolicyGradient:
                     'model_state_dict': self.value_net.state_dict(),
                     'optimizer_state_dict': self.value_net_optim.state_dict(),
                     'loss': value_loss,
-                    }, f'{MODEL_PATH}{env_name}_{CURR_DATE}_valueNet.pth')
+                    }, value_net_name)
 
                 if wandb:
                     wandb.save(policy_net_name)
-                    
-                    if self.log_video:
-                        file_name = VIDEO_PATH + f'{env_name}.mp4'
-                        wandb.log({
-                            "train/video": wandb.Video(file_name, caption='episode: '+str(steps), fps=4, format="mp4"), 
-                            "step": steps})
+                    wandb.save(value_net_name)
 
                 # Log to CSV
                 if self.csv_writer is not None:
@@ -650,23 +654,9 @@ def _log_summary(ep_len, ep_ret, ep_num):
         logging.info(f"--------------------------------------------")
         logging.info('\n')
 
-def train(env, 
-          in_dim, 
-          out_dim, 
-          total_steps, 
-          max_trajectory_size, 
-          trajectory_iterations,
-          noptepochs,
-          learning_rate_p,
-          learning_rate_v,
-          gae_lambda,
-          gamma,
-          epsilon,
-          adam_epsilon,
-          render_steps,
-          save_steps,
-          csv_writer,
-          log_video):
+def train(env, in_dim, out_dim, total_steps, max_trajectory_size, trajectory_iterations,
+          noptepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
+          adam_epsilon, render_steps, save_steps, csv_writer, log_video=False):
     """Train the policy network (actor) and the value network (critic) with PPO"""
     agent = PPO_PolicyGradient(
                 env, 
@@ -712,11 +702,13 @@ if __name__ == '__main__':
     args = arg_parser()
 
     # check if path exists otherwise create
+    if args.video:
+        create_path(VIDEO_PATH)
     create_path(MODEL_PATH)
     create_path(LOG_PATH)
     
     # Hyperparameter
-    total_steps = 1_000_000         # time steps regarding batches collected and train agent
+    total_steps = 10_000_000         # time steps regarding batches collected and train agent
     max_trajectory_size = 1000      # max number of trajectory samples to be sampled per time step. 
     trajectory_iterations = 2408    # number of batches of episodes
     noptepochs = 12                 # Number of epochs per time step to optimize the neural networks
@@ -740,16 +732,6 @@ if __name__ == '__main__':
     
     # seed gym, torch and numpy
     env = make_env(env_name, seed=seed)
-    if args.video:
-        create_path(VIDEO_PATH)
-        #record video for the 100th episodes
-        env = gym.wrappers.RecordVideo(
-            env, 
-            VIDEO_PATH, 
-            step_trigger=lambda x: x == save_steps, 
-            video_length=6, 
-            name_prefix=env_name)
-
     torch.manual_seed(seed)
     np.random.seed(seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
@@ -804,8 +786,7 @@ if __name__ == '__main__':
         },
     name=f"exp_name: {env_name}_{CURR_DATE}",
     monitor_gym=True,
-    save_code=True,
-    resume=True # resume runs
+    save_code=True
     )
 
     # monitor gym
@@ -830,10 +811,12 @@ if __name__ == '__main__':
             save_steps=save_steps,
             csv_writer=csv_writer,
             log_video=args.video)
+    
     elif args.test:
         logging.info('Evaluation model...')
         PATH = './models/Pendulum-v1_2023-01-01_policyNet.pth'
         test(PATH, env, in_dim=obs_dim, out_dim=act_dim)
+    
     else:
         assert("Needs training (--train) or testing (--test) flag set!")
 
