@@ -433,7 +433,7 @@ class PPO_PolicyGradient_V2:
     def finish_episode(self):
         pass 
 
-    def collect_rollout(self, n_step=1, render=True):
+    def collect_rollout(self, n_step=1, render=False):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
         
         step, trajectory_rewards = 0, []
