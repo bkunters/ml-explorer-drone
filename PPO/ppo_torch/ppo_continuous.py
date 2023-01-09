@@ -290,8 +290,8 @@ class PPO_PolicyGradient_V2:
             advantages = self.normalize_adv(advantages)
         return advantages
 
-    def advantage_estimate(self, next_obs, obs, batch_rewards, dones, normalized=True):
-        """Calculating advantage estimate using TD error.
+    def advantage_estimate(self, next_obs, obs, batch_rewards, normalized=True):
+        """ Calculating advantage estimate using TD error.
             - done: only get reward at end of episode, not disounted next state value
         """
         advantages = []
@@ -300,9 +300,8 @@ class PPO_PolicyGradient_V2:
         for rewards in reversed(batch_rewards): # reversed order
             discounted_return = 0
             for i in reversed(range(len(rewards))):
-                mask = (1 - dones[i])
                 discounted_return = rewards[i] + (self.gamma * discounted_return)
-                advantage = discounted_return + (mask * self.gamma *  self.get_value(next_obs[i])) - self.get_value(obs[i])
+                advantage = discounted_return + (self.gamma *  self.get_value(next_obs[i])) - self.get_value(obs[i])
                 advantages.insert(0, advantage)
                 returns.insert(0, discounted_return)
         advantages = np.array(advantages)
@@ -549,7 +548,7 @@ class PPO_PolicyGradient_V2:
 
             # store model in checkpoints
             if steps % self.save_model == 0:
-                env_name = env.unwrapped.spec.id
+                env_name = self.env.unwrapped.spec.id
                 policy_net_name = f'{MODEL_PATH}{env_name}_{CURR_DATE}_policyNet.pth'
                 value_net_name = f'{MODEL_PATH}{env_name}_{CURR_DATE}_valueNet.pth'
                 torch.save({
@@ -744,10 +743,10 @@ def _log_summary(ep_len, ep_ret, ep_num):
 
 def train(env, in_dim, out_dim, total_steps, max_trajectory_size, trajectory_iterations,
           noptepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
-          adam_epsilon, render_steps, save_steps, csv_writer, stats_plotter, log_video=False, ppo_version=2):
+          adam_epsilon, render_steps, save_steps, csv_writer, stats_plotter, log_video=False, ppo_version='v2'):
     """Train the policy network (actor) and the value network (critic) with PPO"""
     agent = None
-    if ppo_version > 1:
+    if ppo_version == 'v2':
         agent = PPO_PolicyGradient_V2(
                     env, 
                     in_dim=in_dim, 
@@ -950,6 +949,8 @@ if __name__ == '__main__':
         test(PATH, env, in_dim=obs_dim, out_dim=act_dim)
     
     elif args.hyperparam:
+        # hyperparameter tuning with sweeps
+
         logging.info('Hyperparameter tuning...')
         # sweep config
         sweep_config = {
@@ -986,7 +987,8 @@ if __name__ == '__main__':
         wandb.agent(sweep_id, hyperparam_tuning, count=5)
 
     else:
-        assert("Needs training (--train) or testing (--test) flag set!")
+        assert("Needs training (--train), testing (--test) or hyperparameter tuning (--hyperparam) flag set!")
+
 
     logging.info('### Done ###')
 
