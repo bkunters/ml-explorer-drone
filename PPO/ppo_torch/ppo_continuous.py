@@ -1,7 +1,6 @@
 from collections import deque
 import torch
 from torch import nn
-import torch.nn.functional as F
 from torch.optim import Adam
 from torch.distributions import MultivariateNormal
 from distutils.util import strtobool
@@ -19,6 +18,7 @@ import sys
 
 # monitoring/logging ML
 import wandb
+from wrapper.stats_logger import StatsPlotter
 from wrapper.stats_logger import CSVWriter
 
 # hyperparameter tuning
@@ -29,6 +29,7 @@ from optuna.integration.wandb import WeightsAndBiasesCallback
 MODEL_PATH = './models/'
 LOG_PATH = './log/'
 VIDEO_PATH = './video/'
+RESULTS_PATH = './results/'
 
 CURR_DATE = datetime.today().strftime('%Y-%m-%d')
 
@@ -98,10 +99,10 @@ class PolicyNet(Net):
         ratio = torch.exp(curr_log_probs - batch_log_probs) # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
         clip_1 = ratio * advantages
         clip_2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * advantages
-        policy_loss = (-torch.min(clip_1, clip_2)).mean() # negative as Adam mins loss, but we want to max it
+        policy_loss = (-torch.min(clip_1, clip_2)) # negative as Adam mins loss, but we want to max it
         # calc clip frac
-        # self.clip_fraction = (abs((ratio - 1.0)) > clip_eps).to(torch.float).mean()
-        return policy_loss
+        self.clip_fraction = (abs((ratio - 1.0)) > clip_eps).to(torch.float).mean()
+        return policy_loss.mean() # return mean
 
 
 ####################
@@ -126,6 +127,7 @@ class PPO_PolicyGradient_V1:
         render=10,
         save_model=10,
         csv_writer=None,
+        stats_plotter=None,
         log_video=False) -> None:
         
         # hyperparams
@@ -153,6 +155,7 @@ class PPO_PolicyGradient_V1:
         # keep track of rewards per episode
         self.ep_returns = deque(maxlen=max_trajectory_size)
         self.csv_writer = csv_writer
+        self.stats_plotter = stats_plotter
         self.stats_data = {'mean episodic length': [], 'mean episodic rewards': [], 'timestep': []}
 
         # add net for actor and critic
@@ -193,6 +196,7 @@ class PPO_PolicyGradient_V2:
         render=10,
         save_model=10,
         csv_writer=None,
+        stats_plotter=None,
         log_video=False) -> None:
         
         # hyperparams
@@ -220,6 +224,7 @@ class PPO_PolicyGradient_V2:
         # keep track of rewards per episode
         self.ep_returns = deque(maxlen=max_trajectory_size)
         self.csv_writer = csv_writer
+        self.stats_plotter = stats_plotter
         self.stats_data = {'mean episodic length': [], 'mean episodic rewards': [], 'timestep': []}
 
         # add net for actor and critic
@@ -539,6 +544,7 @@ class PPO_PolicyGradient_V2:
                 policy_losses.append(policy_loss.detach().numpy())
                 value_losses.append(value_loss.detach().numpy())
 
+            # log all statistical values to CSV
             self.log_stats(policy_losses, value_losses, rewards, batch_lens, steps)
 
             # store model in checkpoints
@@ -564,11 +570,15 @@ class PPO_PolicyGradient_V2:
                     wandb.save(value_net_name)
 
                 # Log to CSV
-                if self.csv_writer is not None:
+                if self.csv_writer:
                     self.csv_writer(self.stats_data)
                     for value in self.stats_data.values():
                         del value[:]
 
+        # Finalize and plot stats
+        if self.stats_plotter:
+            df = self.stats_plotter.read_csv(CURR_DATE) # just select files from current date
+            self.stats_plotter.plot(df, x='timestep', y='mean episodic rewards', title=env_name)
 
     def log_stats(self, p_losses, v_losses, batch_return, batch_lens, steps):
         """Calculate stats and log to W&B, CSV, logger """
@@ -597,7 +607,7 @@ class PPO_PolicyGradient_V2:
             'train/mean value loss': mean_v_loss,
             'train/mean episode length': mean_ep_lens,
             'train/mean episode returns': mean_ep_rews,
-            'train/std episode returns': std_ep_rews,
+            'train/std episode returns': std_ep_rews
         })
 
         logging.info('\n')
@@ -734,27 +744,49 @@ def _log_summary(ep_len, ep_ret, ep_num):
 
 def train(env, in_dim, out_dim, total_steps, max_trajectory_size, trajectory_iterations,
           noptepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
-          adam_epsilon, render_steps, save_steps, csv_writer, log_video=False):
+          adam_epsilon, render_steps, save_steps, csv_writer, stats_plotter, log_video=False, ppo_version=2):
     """Train the policy network (actor) and the value network (critic) with PPO"""
-    agent = PPO_PolicyGradient_V2(
-                env, 
-                in_dim=in_dim, 
-                out_dim=out_dim,
-                total_steps=total_steps,
-                max_trajectory_size=max_trajectory_size,
-                trajectory_iterations=trajectory_iterations,
-                noptepochs=noptepochs,
-                lr_p=learning_rate_p,
-                lr_v=learning_rate_v,
-                gae_lambda = gae_lambda,
-                gamma=gamma,
-                epsilon=epsilon,
-                adam_eps=adam_epsilon,
-                render=render_steps,
-                save_model=save_steps,
-                csv_writer=csv_writer,
-                log_video=log_video)
-    
+    agent = None
+    if ppo_version > 1:
+        agent = PPO_PolicyGradient_V2(
+                    env, 
+                    in_dim=in_dim, 
+                    out_dim=out_dim,
+                    total_steps=total_steps,
+                    max_trajectory_size=max_trajectory_size,
+                    trajectory_iterations=trajectory_iterations,
+                    noptepochs=noptepochs,
+                    lr_p=learning_rate_p,
+                    lr_v=learning_rate_v,
+                    gae_lambda = gae_lambda,
+                    gamma=gamma,
+                    epsilon=epsilon,
+                    adam_eps=adam_epsilon,
+                    render=render_steps,
+                    save_model=save_steps,
+                    csv_writer=csv_writer,
+                    stats_plotter=stats_plotter,
+                    log_video=log_video)
+    else:
+        agent = PPO_PolicyGradient_V1(
+                    env, 
+                    in_dim=in_dim, 
+                    out_dim=out_dim,
+                    total_steps=total_steps,
+                    max_trajectory_size=max_trajectory_size,
+                    trajectory_iterations=trajectory_iterations,
+                    noptepochs=noptepochs,
+                    lr_p=learning_rate_p,
+                    lr_v=learning_rate_v,
+                    gae_lambda = gae_lambda,
+                    gamma=gamma,
+                    epsilon=epsilon,
+                    adam_eps=adam_epsilon,
+                    render=render_steps,
+                    save_model=save_steps,
+                    csv_writer=csv_writer,
+                    stats_plotter=stats_plotter,
+                    log_video=log_video)
     # run training for a total amount of steps
     agent.learn()
 
@@ -805,9 +837,10 @@ if __name__ == '__main__':
         create_path(VIDEO_PATH)
     create_path(MODEL_PATH)
     create_path(LOG_PATH)
+    create_path(RESULTS_PATH)
     
     # Hyperparameter
-    total_steps = 10_000_000         # time steps regarding batches collected and train agent
+    total_steps = 5_000_000         # time steps regarding batches collected and train agent
     max_trajectory_size = 1000      # max number of trajectory samples to be sampled per time step. 
     trajectory_iterations = 2408    # number of batches of episodes
     noptepochs = 12                 # Number of epochs per time step to optimize the neural networks
@@ -863,6 +896,7 @@ if __name__ == '__main__':
 
     # create CSV writer
     csv_writer = CSVWriter(f"{LOG_PATH}{env_name}_{CURR_DATE}.csv")
+    stats_plotter = StatsPlotter(LOG_PATH, f'{env_name}_{CURR_DATE}.png', RESULTS_PATH)
 
     # Monitoring with W&B
     wandb.init(
@@ -907,6 +941,7 @@ if __name__ == '__main__':
             render_steps=render_steps,
             save_steps=save_steps,
             csv_writer=csv_writer,
+            stats_plotter=stats_plotter,
             log_video=args.video)
     
     elif args.test:

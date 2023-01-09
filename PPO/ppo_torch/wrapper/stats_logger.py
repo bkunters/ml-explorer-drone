@@ -1,4 +1,8 @@
+import fnmatch
+import glob
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 import os
 
 class StatsLogger:
@@ -18,12 +22,45 @@ class StatsLogger:
 
 class StatsPlotter:
     """Plotting collected network statistics as graphs."""
-    def __init__(self) -> None:
-        pass
+    def __init__(self, csv_path, img_name, results_path) -> None:
+        self.csv_path = csv_path
+        self.img_name = img_name
+        self.result_path = results_path
+    
+    def get_files(self, path):
+        """Get all files from a path"""
+        all_files = glob.glob(os.path.join(path , "/*.csv"))
+        files = []
+        for filename in all_files:
+            df = pd.read_csv(filename, index_col=None, header=0)
+            files.append(df)
+        return files
 
-    def plot(self):
-        pass
+    def read_csv(self, date:str):
+        """ Use file path to collect all csv files.
+            Concats all files and returns a pandas dataframe.
+        """
+        all_files = glob.glob(os.path.join(self.csv_path, f"*{date}*.csv"))
+        df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
+        return df
 
+    def plot(self, dataframe, kind='line', x='x-label', y='y-label', title='title', upper_bound=None, lower_bound=None):
+        """ Create a lineplot with seaborn.
+            Doc: https://seaborn.pydata.org/tutorial/introduction
+        """
+        line_plot = sns.relplot(
+            data=dataframe, kind=kind,
+            x=x, y=y)
+        line_plot.set(title=title)
+        # draw a horizontal line
+        if upper_bound:
+            line_plot.axhline(upper_bound)
+        if lower_bound:
+            line_plot.axhline(lower_bound)
+        # plot the file to given destination
+        file_path = self.result_path + self.img_name
+        line_plot.figure.savefig(file_path)
+        plt.show()
 
 class CSVWriter:
     """Log the network outputs via pandas to a CSV file.
