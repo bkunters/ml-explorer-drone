@@ -115,7 +115,7 @@ class PPO_PolicyGradient_V1:
         in_dim, 
         out_dim,
         total_timesteps,
-        max_trajectory_size,
+        max_batch_size,
         trajectory_iterations,
         noptepochs=5,
         lr_p=1e-3,
@@ -134,7 +134,7 @@ class PPO_PolicyGradient_V1:
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.total_timesteps = total_timesteps
-        self.max_trajectory_size = max_trajectory_size
+        self.max_batch_size = max_batch_size
         self.trajectory_iterations = trajectory_iterations
         self.noptepochs = noptepochs
         self.lr_p = lr_p
@@ -153,7 +153,7 @@ class PPO_PolicyGradient_V1:
         self.log_video = log_video
 
         # keep track of rewards per episode
-        self.ep_returns = deque(maxlen=max_trajectory_size)
+        self.ep_returns = deque(maxlen=max_batch_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
         self.stats_data = {'experiment': [], 'timestep': [], 'mean episodic length': [], 'mean episodic returns': [], 'std episodic returns': []}
@@ -184,7 +184,7 @@ class PPO_PolicyGradient_V2:
         in_dim, 
         out_dim,
         total_timesteps,
-        max_trajectory_size,
+        max_batch_size,
         trajectory_iterations,
         noptepochs=5,
         lr_p=1e-3,
@@ -203,7 +203,7 @@ class PPO_PolicyGradient_V2:
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.total_timesteps = total_timesteps
-        self.max_trajectory_size = max_trajectory_size
+        self.max_batch_size = max_batch_size
         self.trajectory_iterations = trajectory_iterations
         self.noptepochs = noptepochs
         self.lr_p = lr_p
@@ -222,10 +222,17 @@ class PPO_PolicyGradient_V2:
         self.log_video = log_video
 
         # keep track of rewards per episode
-        self.ep_returns = deque(maxlen=max_trajectory_size)
+        self.ep_returns = deque(maxlen=max_batch_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
-        self.stats_data = {'experiment': [], 'timestep': [], 'mean episodic length': [], 'mean episodic returns': [], 'std episodic returns': []}
+        self.stats_data = {'experiment': [], 
+                           'timestep': [], 
+                           'mean episodic length': [], 
+                           'mean episodic returns': [], 
+                           'info/mean episodic returns': [], 
+                           'info/mean episodic length': [], 
+                           'info/time': []
+                        }
 
         # add net for actor and critic
         self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor) - (policy-based method) "How the agent behaves"
@@ -469,7 +476,7 @@ class PPO_PolicyGradient_V2:
 
             # Run episode for a fixed amount of timesteps
             # to keep rollout size fixed and episodes independent
-            for ep_t in range(0, self.max_trajectory_size):
+            for ep_t in range(0, self.max_batch_size):
                 # render gym envs
                 if render and ep_t % self.render_steps == 0:
                     self.env.render()
@@ -496,8 +503,15 @@ class PPO_PolicyGradient_V2:
 
                 # break out of loop if episode is terminated
                 if done:
+                    info_episode = info[0]['episode']
+                    info_episode_r = info_episode['r']
+                    info_episode_l = info_episode['l']
+                    info_episode_t = info_episode['t']
+                    self.stats_data['info/mean episodic returns'].append(info_episode_r)
+                    self.stats_data['info/mean episodic length'].append(info_episode_l)
+                    self.stats_data['info/time'].append(info_episode_t)
                     break
-            
+
             batch_lens.append(ep_t + 1) # as we started at 0
             batch_rewards.append(trajectory_rewards)
 
@@ -756,7 +770,7 @@ def _log_summary(ep_len, ep_ret, ep_num):
         logging.info(f"--------------------------------------------")
         logging.info('\n')
 
-def train(env, in_dim, out_dim, total_timesteps, max_trajectory_size, trajectory_iterations,
+def train(env, in_dim, out_dim, total_timesteps, max_batch_size, trajectory_iterations,
           noptepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
           adam_epsilon, render_steps, save_steps, csv_writer, stats_plotter, log_video=False, ppo_version='v2'):
     """Train the policy network (actor) and the value network (critic) with PPO"""
@@ -767,7 +781,7 @@ def train(env, in_dim, out_dim, total_timesteps, max_trajectory_size, trajectory
                     in_dim=in_dim, 
                     out_dim=out_dim,
                     total_timesteps=total_timesteps,
-                    max_trajectory_size=max_trajectory_size,
+                    max_batch_size=max_batch_size,
                     trajectory_iterations=trajectory_iterations,
                     noptepochs=noptepochs,
                     lr_p=learning_rate_p,
@@ -787,7 +801,7 @@ def train(env, in_dim, out_dim, total_timesteps, max_trajectory_size, trajectory
                     in_dim=in_dim, 
                     out_dim=out_dim,
                     total_timesteps=total_timesteps,
-                    max_trajectory_size=max_trajectory_size,
+                    max_batch_size=max_batch_size,
                     trajectory_iterations=trajectory_iterations,
                     noptepochs=noptepochs,
                     lr_p=learning_rate_p,
@@ -824,7 +838,7 @@ def hyperparam_tuning(config=None):
                 in_dim=config.obs_dim, 
                 out_dim=config.act_dim,
                 total_timesteps=config.total_timesteps,
-                max_trajectory_size=config.max_trajectory_size,
+                max_batch_size=config.max_batch_size,
                 trajectory_iterations=config.trajectory_iterations,
                 noptepochs=config.noptepochs,
                 gae_lambda = config.gae_lambda,
@@ -855,7 +869,7 @@ if __name__ == '__main__':
     
     # Hyperparameter
     total_timesteps = 3_500_000     # time steps regarding batches collected and train agent
-    max_trajectory_size = 1000      # max number of trajectory samples to be sampled per time step. 
+    max_batch_size = 1000      # max number of trajectory samples to be sampled per time step. 
     trajectory_iterations = 2048    # number of batches per episode
     noptepochs = 12                 # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4          # learning rate for policy network
@@ -921,7 +935,7 @@ if __name__ == '__main__':
                 'env name': env_name,
                 'env number': env_number,
                 'total number of steps': total_timesteps,
-                'max sampled trajectories': max_trajectory_size,
+                'max sampled trajectories': max_batch_size,
                 'batches per episode': trajectory_iterations,
                 'number of epochs for update': noptepochs,
                 'input layer size': obs_dim,
@@ -943,14 +957,13 @@ if __name__ == '__main__':
             save_code=True
         )
 
-    train_model = True
-    if train_model:
+    if args.train:
         logging.info('Training model...')
         train(env,
             in_dim=obs_dim, 
             out_dim=act_dim,
             total_timesteps=total_timesteps,
-            max_trajectory_size=max_trajectory_size,
+            max_batch_size=max_batch_size,
             trajectory_iterations=trajectory_iterations,
             noptepochs=noptepochs,
             learning_rate_p=learning_rate_p, 
