@@ -231,7 +231,7 @@ class PPO_PolicyGradient_V2:
                            'mean episodic returns': [], 
                            'info/mean episodic returns': [], 
                            'info/mean episodic length': [], 
-                           'info/time': []
+                           'info/mean episodic time': []
                         }
 
         # add net for actor and critic
@@ -509,7 +509,13 @@ class PPO_PolicyGradient_V2:
                     info_episode_t = info_episode['t']
                     self.stats_data['info/mean episodic returns'].append(info_episode_r)
                     self.stats_data['info/mean episodic length'].append(info_episode_l)
-                    self.stats_data['info/time'].append(info_episode_t)
+                    self.stats_data['info/mean episodic time'].append(info_episode_t)
+
+                    wandb.log({
+                        'info/mean episodic returns': info_episode_r,
+                        'info/mean episodic length': info_episode_l,
+                        'info/mean episodic time': info_episode_t
+                    })
                     break
 
             batch_lens.append(ep_t + 1) # as we started at 0
