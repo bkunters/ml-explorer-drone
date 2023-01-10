@@ -40,7 +40,7 @@ CURR_DATE = datetime.today().strftime('%Y-%m-%d')
 
 # Hint: Please if working on it mark a todo as (done) if done
 # 1) Check current implementation against article: https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/
-# 3) Check calculation of advantage 
+# 3) Check calculation of advantage and GAE
 
 ####################
 ####################
@@ -114,7 +114,7 @@ class PPO_PolicyGradient_V1:
         env, 
         in_dim, 
         out_dim,
-        total_steps,
+        total_timesteps,
         max_trajectory_size,
         trajectory_iterations,
         noptepochs=5,
@@ -133,7 +133,7 @@ class PPO_PolicyGradient_V1:
         # hyperparams
         self.in_dim = in_dim
         self.out_dim = out_dim
-        self.total_steps = total_steps
+        self.total_timesteps = total_timesteps
         self.max_trajectory_size = max_trajectory_size
         self.trajectory_iterations = trajectory_iterations
         self.noptepochs = noptepochs
@@ -156,7 +156,7 @@ class PPO_PolicyGradient_V1:
         self.ep_returns = deque(maxlen=max_trajectory_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
-        self.stats_data = {'mean episodic length': [], 'mean episodic rewards': [], 'timestep': []}
+        self.stats_data = {'experiment': [], 'timestep': [], 'mean episodic length': [], 'mean episodic returns': [], 'std episodic returns': []}
 
         # add net for actor and critic
         self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor) - (policy-based method) "How the agent behaves"
@@ -183,7 +183,7 @@ class PPO_PolicyGradient_V2:
         env, 
         in_dim, 
         out_dim,
-        total_steps,
+        total_timesteps,
         max_trajectory_size,
         trajectory_iterations,
         noptepochs=5,
@@ -202,7 +202,7 @@ class PPO_PolicyGradient_V2:
         # hyperparams
         self.in_dim = in_dim
         self.out_dim = out_dim
-        self.total_steps = total_steps
+        self.total_timesteps = total_timesteps
         self.max_trajectory_size = max_trajectory_size
         self.trajectory_iterations = trajectory_iterations
         self.noptepochs = noptepochs
@@ -225,7 +225,7 @@ class PPO_PolicyGradient_V2:
         self.ep_returns = deque(maxlen=max_trajectory_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
-        self.stats_data = {'mean episodic length': [], 'mean episodic rewards': [], 'timestep': []}
+        self.stats_data = {'experiment': [], 'timestep': [], 'mean episodic length': [], 'mean episodic returns': [], 'std episodic returns': []}
 
         # add net for actor and critic
         self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor) - (policy-based method) "How the agent behaves"
@@ -269,8 +269,44 @@ class PPO_PolicyGradient_V2:
         action, log_prob, entropy = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
 
-    def cummulative_return(self, batch_rewards, normalized=False):
-        """Calculate cummulative rewards with discount factor gamma."""
+    def cummulative_return(self, batch_rewards):
+        cum_returns = []
+        for rewards in reversed(batch_rewards): # reversed order
+            discounted_reward = 0
+            for reward in reversed(rewards):
+                discounted_reward = reward + (self.gamma * discounted_reward)
+                cum_returns.insert(0, discounted_reward) # reverse it again
+        return torch.tensor(np.array(cum_returns), dtype=torch.float)
+
+    def advantage_estimate(self, batch_rewards, values, normalized=True):
+        """ Calculating advantage estimate using TD error (Temporal Difference Error).
+            TD Error can be used as an estimator for Advantage function,
+            - dones: only get reward at end of episode, not disounted next state value
+        """
+        # check if tensor and convert to numpy
+        if torch.is_tensor(batch_rewards):
+            batch_rewards = batch_rewards.detach().numpy()
+        if torch.is_tensor(values):
+            values = values.detach().numpy()
+
+        advantages = []
+        last_value = values[-1]
+        for rewards in reversed(batch_rewards):  # reversed order
+            for i in reversed(range(len(rewards))):
+                # TD error: A(s,a) = r + gamma * V(s_t+1) - V(s_t)
+                temp_pred = gamma * last_value - values[i]
+                advantage = rewards[i] + temp_pred
+                advantages.insert(0, advantage)
+                last_value = values[i]
+        advantages = torch.tensor(np.array(advantages), dtype=torch.float)
+        if normalized:
+            advantages = self.normalize_adv(advantages)
+        return advantages
+
+    def generalized_advantage_estimate_0(self, batch_rewards, values, normalized=True):
+        """ Generalized Advantage Estimate calculation
+            Calculate delta, which is defined by delta = r - v 
+        """
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
         # return value: G(t) = R(t) + gamma * R(t-1)
         cum_returns = []
@@ -279,35 +315,12 @@ class PPO_PolicyGradient_V2:
             for reward in reversed(rewards):
                 discounted_reward = reward + (self.gamma * discounted_reward)
                 cum_returns.insert(0, discounted_reward) # reverse it again
-        if normalized:
-            cum_returns = (cum_returns - cum_returns.mean()) / cum_returns.std()
-        return torch.tensor(cum_returns, dtype=torch.float)
-
-    def advantage_estimate_(self, returns, values, normalized=True):
-        """Calculate delta, which is defined by delta = r - v """
-        advantages = returns - values # delta = r - v
+        cum_returns = torch.tensor(np.array(cum_returns), dtype=torch.float)
+        advantages = cum_returns - values # delta = r - v
+        # normalize for more stability
         if normalized:
             advantages = self.normalize_adv(advantages)
-        return advantages
-
-    def advantage_estimate(self, next_obs, obs, batch_rewards, normalized=True):
-        """ Calculating advantage estimate using TD error.
-            - done: only get reward at end of episode, not disounted next state value
-        """
-        advantages = []
-        returns = []
-        
-        for rewards in reversed(batch_rewards): # reversed order
-            discounted_return = 0
-            for i in reversed(range(len(rewards))):
-                discounted_return = rewards[i] + (self.gamma * discounted_return)
-                advantage = discounted_return + (self.gamma *  self.get_value(next_obs[i])) - self.get_value(obs[i])
-                advantages.insert(0, advantage)
-                returns.insert(0, discounted_return)
-        advantages = np.array(advantages)
-        if normalized:
-            advantages = self.normalize_adv(advantages)
-        return torch.tensor(advantages, dtype=torch.float), torch.tensor(np.array(returns), dtype=torch.float)
+        return advantages, cum_returns
 
     def generalized_advantage_estimate_1(self, batch_rewards, values, normalized=True):
         """ Generalized Advantage Estimate calculation
@@ -519,21 +532,21 @@ class PPO_PolicyGradient_V2:
         """"""
         steps = 0
 
-        while steps < self.total_steps:
+        while steps < self.total_timesteps:
             policy_losses, value_losses = [], []
             # Collect trajectory
             # STEP 3: simulate and collect trajectories --> the following values are all per batch
-            obs, next_obs, actions, batch_log_probs, dones, rewards, batch_lens = self.collect_rollout(n_step=self.trajectory_iterations)
+            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens = self.collect_rollout(n_step=self.trajectory_iterations)
 
             # timesteps simulated so far for batch collection
-            steps += np.sum(batch_lens)
+            steps += np.sum(ep_lens)
 
             # STEP 4-5: Calculate cummulated reward and GAE at timestep t_step
             values, _ , _ = self.get_values(obs, actions)
-            # cum_returns = self.cummulative_return(rewards)
+            cum_returns = self.cummulative_return(rewards)
             # advantages = self.advantage_estimate_(cum_returns, values.detach())
-            advantages, cum_returns = self.generalized_advantage_estimate_1(rewards, values.detach())
-
+            #advantages, cum_returns = self.generalized_advantage_estimate_0(rewards, values.detach())
+            advantages = self.advantage_estimate(rewards, values)
             # update network params 
             for _ in range(self.noptepochs):
                 # STEP 6-7: calculate loss and update weights
@@ -544,7 +557,7 @@ class PPO_PolicyGradient_V2:
                 value_losses.append(value_loss.detach().numpy())
 
             # log all statistical values to CSV
-            self.log_stats(policy_losses, value_losses, rewards, batch_lens, steps)
+            self.log_stats(policy_losses, value_losses, rewards, ep_lens, steps)
 
             # store model in checkpoints
             if steps % self.save_model == 0:
@@ -577,9 +590,9 @@ class PPO_PolicyGradient_V2:
         # Finalize and plot stats
         if self.stats_plotter:
             df = self.stats_plotter.read_csv(CURR_DATE) # just select files from current date
-            self.stats_plotter.plot(df, x='timestep', y='mean episodic rewards', title=env_name)
+            self.stats_plotter.plot(df, kind='line', hue='std episodic returns', x='timestep', y='mean episodic returns', title=env_name)
 
-    def log_stats(self, p_losses, v_losses, batch_return, batch_lens, steps):
+    def log_stats(self, p_losses, v_losses, batch_return, batch_lens, steps, exp_name='experiment'):
         """Calculate stats and log to W&B, CSV, logger """
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
@@ -589,14 +602,16 @@ class PPO_PolicyGradient_V2:
 
         # Calculate the stats of an episode
         cum_ret = [np.sum(ep_rews) for ep_rews in batch_return]
-        mean_ep_lens = np.mean(batch_lens)
-        mean_ep_rews = np.mean(cum_ret)
+        mean_ep_len = np.mean(batch_lens)
+        mean_ep_rew = np.mean(cum_ret)
         # calculate standard deviation (spred of distribution)
-        std_ep_rews = np.std(cum_ret)
+        std_ep_rew = np.std(cum_ret)
 
         # Log stats to CSV file
-        self.stats_data['mean episodic length'].append(mean_ep_lens)
-        self.stats_data['mean episodic rewards'].append(mean_ep_rews)
+        self.stats_data['experiment'].append(exp_name)
+        self.stats_data['mean episodic length'].append(mean_ep_len)
+        self.stats_data['mean episodic returns'].append(mean_ep_rew)
+        self.stats_data['std episodic returns'].append(std_ep_rew)
         self.stats_data['timestep'].append(steps)
 
         # Monitoring via W&B
@@ -604,14 +619,14 @@ class PPO_PolicyGradient_V2:
             'train/timesteps': steps,
             'train/mean policy loss': mean_p_loss,
             'train/mean value loss': mean_v_loss,
-            'train/mean episode length': mean_ep_lens,
-            'train/mean episode returns': mean_ep_rews,
-            'train/std episode returns': std_ep_rews
+            'train/mean episode length': mean_ep_len,
+            'train/mean episode returns': mean_ep_rew,
+            'train/std episode returns': std_ep_rew
         })
 
         logging.info('\n')
         logging.info(f'------------ Episode: {steps} --------------')
-        logging.info(f"Mean return:          {mean_ep_rews}")
+        logging.info(f"Mean return:          {mean_ep_rew}")
         logging.info(f"Mean policy loss:     {mean_p_loss}")
         logging.info(f"Mean value loss:      {mean_v_loss}")
         logging.info('--------------------------------------------')
@@ -625,11 +640,11 @@ def arg_parser():
     parser = argparse.ArgumentParser()
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+    parser.add_argument("--video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False,
         help="if toggled, capture video of run")
     parser.add_argument("--train", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="if toggled, run model in training mode")
-    parser.add_argument("--test", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+    parser.add_argument("--test", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False,
         help="if toggled, run model in testing mode")
     parser.add_argument("--hyperparam", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="if toggled, log hyperparameters")
@@ -741,7 +756,7 @@ def _log_summary(ep_len, ep_ret, ep_num):
         logging.info(f"--------------------------------------------")
         logging.info('\n')
 
-def train(env, in_dim, out_dim, total_steps, max_trajectory_size, trajectory_iterations,
+def train(env, in_dim, out_dim, total_timesteps, max_trajectory_size, trajectory_iterations,
           noptepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
           adam_epsilon, render_steps, save_steps, csv_writer, stats_plotter, log_video=False, ppo_version='v2'):
     """Train the policy network (actor) and the value network (critic) with PPO"""
@@ -751,7 +766,7 @@ def train(env, in_dim, out_dim, total_steps, max_trajectory_size, trajectory_ite
                     env, 
                     in_dim=in_dim, 
                     out_dim=out_dim,
-                    total_steps=total_steps,
+                    total_timesteps=total_timesteps,
                     max_trajectory_size=max_trajectory_size,
                     trajectory_iterations=trajectory_iterations,
                     noptepochs=noptepochs,
@@ -771,7 +786,7 @@ def train(env, in_dim, out_dim, total_steps, max_trajectory_size, trajectory_ite
                     env, 
                     in_dim=in_dim, 
                     out_dim=out_dim,
-                    total_steps=total_steps,
+                    total_timesteps=total_timesteps,
                     max_trajectory_size=max_trajectory_size,
                     trajectory_iterations=trajectory_iterations,
                     noptepochs=noptepochs,
@@ -808,7 +823,7 @@ def hyperparam_tuning(config=None):
                 env,
                 in_dim=config.obs_dim, 
                 out_dim=config.act_dim,
-                total_steps=config.total_steps,
+                total_timesteps=config.total_timesteps,
                 max_trajectory_size=config.max_trajectory_size,
                 trajectory_iterations=config.trajectory_iterations,
                 noptepochs=config.noptepochs,
@@ -839,9 +854,9 @@ if __name__ == '__main__':
     create_path(RESULTS_PATH)
     
     # Hyperparameter
-    total_steps = 5_000_000         # time steps regarding batches collected and train agent
+    total_timesteps = 3_500_000     # time steps regarding batches collected and train agent
     max_trajectory_size = 1000      # max number of trajectory samples to be sampled per time step. 
-    trajectory_iterations = 2408    # number of batches of episodes
+    trajectory_iterations = 2048    # number of batches per episode
     noptepochs = 12                 # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4          # learning rate for policy network
     learning_rate_v = 1e-3          # learning rate for value network
@@ -903,35 +918,42 @@ if __name__ == '__main__':
             entity='drone-mechanics',
             sync_tensorboard=True,
             config={ # stores hyperparams in job
-            'total number of steps': total_steps,
-            'max sampled trajectories': max_trajectory_size,
-            'batches per episode': trajectory_iterations,
-            'number of epochs for update': noptepochs,
-            'input layer size': obs_dim,
-            'output layer size': act_dim,
-            'learning rate (policy net)': learning_rate_p,
-            'learning rate (value net)': learning_rate_v,
-            'epsilon (adam optimizer)': adam_epsilon,
-            'gamma (discount)': gamma,
-            'epsilon (clipping)': epsilon,
-            'gae lambda (GAE)': gae_lambda,
-            'seed': seed
-        },
-            name=f"exp_name: {env_name}_{CURR_DATE}",
+                'env name': env_name,
+                'env number': env_number,
+                'total number of steps': total_timesteps,
+                'max sampled trajectories': max_trajectory_size,
+                'batches per episode': trajectory_iterations,
+                'number of epochs for update': noptepochs,
+                'input layer size': obs_dim,
+                'output layer size': act_dim,
+                'observation space': obs_shape,
+                'action space': act_shape,
+                'action space upper bound': upper_bound,
+                'action space lower bound': lower_bound,
+                'learning rate (policy net)': learning_rate_p,
+                'learning rate (value net)': learning_rate_v,
+                'epsilon (adam optimizer)': adam_epsilon,
+                'gamma (discount)': gamma,
+                'epsilon (clipping)': epsilon,
+                'gae lambda (GAE)': gae_lambda,
+                'seed': seed
+            },
+            name=f"exp_name: {env_name}_{CURR_DATE} {args.exp_name}", # needs flag --exp-name
             monitor_gym=True,
             save_code=True
         )
 
-    if args.train:
+    train_model = True
+    if train_model:
         logging.info('Training model...')
         train(env,
             in_dim=obs_dim, 
             out_dim=act_dim,
-            total_steps=total_steps,
+            total_timesteps=total_timesteps,
             max_trajectory_size=max_trajectory_size,
             trajectory_iterations=trajectory_iterations,
             noptepochs=noptepochs,
-            learning_rate_p=learning_rate_p,
+            learning_rate_p=learning_rate_p, 
             learning_rate_v=learning_rate_v,
             gae_lambda = gae_lambda,
             gamma=gamma,
@@ -989,6 +1011,9 @@ if __name__ == '__main__':
     else:
         assert("Needs training (--train), testing (--test) or hyperparameter tuning (--hyperparam) flag set!")
 
+    #################
+    #### Cleanup ####
+    #################
 
     logging.info('### Done ###')
 

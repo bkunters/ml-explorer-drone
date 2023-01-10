@@ -1,4 +1,3 @@
-import fnmatch
 import glob
 import pandas as pd
 import seaborn as sns
@@ -44,13 +43,13 @@ class StatsPlotter:
         df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
         return df
 
-    def plot(self, dataframe, kind='line', x='x-label', y='y-label', title='title', upper_bound=None, lower_bound=None):
+    def plot(self, dataframe, kind='line', hue='', x='x-label', y='y-label', title='title', upper_bound=None, lower_bound=None):
         """ Create a lineplot with seaborn.
             Doc: https://seaborn.pydata.org/tutorial/introduction
         """
         line_plot = sns.relplot(
             data=dataframe, kind=kind,
-            x=x, y=y)
+            x=x, y=y, hue=hue, height=7, aspect=.7)
         line_plot.set(title=title)
         # draw a horizontal line
         if upper_bound:
@@ -60,7 +59,6 @@ class StatsPlotter:
         # plot the file to given destination
         file_path = self.result_path + self.img_name
         line_plot.figure.savefig(file_path)
-        plt.show()
 
 class CSVWriter:
     """Log the network outputs via pandas to a CSV file.
