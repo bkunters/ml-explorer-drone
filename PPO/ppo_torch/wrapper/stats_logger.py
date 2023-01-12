@@ -2,7 +2,17 @@ import glob
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.ndimage.filters import gaussian_filter1d
 import os
+
+# switch style
+sns.set_theme()
+sns.set_context("notebook", font_scale=1.5, rc={"lines.linewidth": 2.5})
+# setup plotting 
+plt.rcParams["figure.figsize"] = [12.50, 9.50]
+plt.rcParams["figure.autolayout"] = True
+
 
 class StatsLogger:
     """ Log all statistical values over the runtime
@@ -21,10 +31,9 @@ class StatsLogger:
 
 class StatsPlotter:
     """Plotting collected network statistics as graphs."""
-    def __init__(self, csv_path, img_name, results_path) -> None:
-        self.csv_path = csv_path
-        self.img_name = img_name
-        self.result_path = results_path
+    def __init__(self, csv_folder_path, file_name_and_path) -> None:
+        self.csv_folder_path = csv_folder_path
+        self.file_name_and_path = file_name_and_path
     
     def get_files(self, path):
         """Get all files from a path"""
@@ -35,30 +44,79 @@ class StatsPlotter:
             files.append(df)
         return files
 
-    def read_csv(self, date:str):
+    def read_csv(self):
         """ Use file path to collect all csv files.
             Concats all files and returns a pandas dataframe.
         """
-        all_files = glob.glob(os.path.join(self.csv_path, f"*{date}*.csv"))
+        # find all csv files in this folder
+        csv_file = os.path.join(self.csv_folder_path, f"*.csv")
+        all_files = glob.glob(csv_file)
         df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
         return df
 
-    def plot(self, dataframe, kind='line', hue='', x='x-label', y='y-label', title='title', upper_bound=None, lower_bound=None):
+    def plot_box(self, dataframe, x, y, title='title', x_label='Timestep', y_label='Mean Episodic Time'):        
+        # get exp names
+        df_exp = dataframe['experiment'].values.astype('str')
+        df_exp_unique = list(dict.fromkeys(df_exp))
+        # plot boxes
+        ax = sns.barplot(data=dataframe, x=x, y=y)
+        ax.set(title=title, xlabel=x_label, ylabel=y_label)
+        # set legend
+        plt.legend(labels=df_exp_unique, loc='center right')
+        # plot the file to given destination
+        ax.figure.savefig(self.file_name_and_path)
+        plt.show()
+
+    def plot_seaborn_fill(self, dataframe, x, y, y_min, y_max, title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=0, lower_bound=-1800, ylim_low=-2000, ylim_up=200, color='blue', smoothing=2):
+        # get values from df
+        # add smoothing
+        df_min = gaussian_filter1d(dataframe[y_min].to_numpy(), sigma=smoothing)
+        df_max = gaussian_filter1d(dataframe[y_max].to_numpy(), sigma=smoothing)
+        df_x = dataframe[x].to_numpy()
+        df_y = gaussian_filter1d(dataframe[y].to_numpy(), sigma=smoothing)
+        # get exp names
+        df_exp = dataframe['experiment'].values.astype('str')
+        df_exp_unique = list(dict.fromkeys(df_exp))
+
+        # draw mean line
+        ax = sns.lineplot(x=df_x, y=df_y)
+        # fill std
+        ax.fill_between(x=df_x, y1=df_min, y2=df_max, color=sns.xkcd_rgb[color], alpha=0.2)
+        # draw upper and lower bounds
+        ax.axhline(lower_bound, linewidth=1, color='red', label='lower bound')
+        ax.axhline(upper_bound, linewidth=1, color='red', label='upper bound')
+        ax.set(title=title, xlabel=x_label, ylabel=y_label, ylim=(ylim_low, ylim_up))
+
+        # set legend
+        plt.legend(labels=df_exp_unique, loc='upper right')
+
+        # plot the file to given destination
+        ax.figure.savefig(self.file_name_and_path)
+        plt.show()
+
+
+    def plot_seaborn(self, dataframe, x, y, hue='hue', title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=0, lower_bound=-1800):
         """ Create a lineplot with seaborn.
             Doc: https://seaborn.pydata.org/tutorial/introduction
         """
-        line_plot = sns.relplot(
-            data=dataframe, kind=kind,
-            x=x, y=y, hue=hue, height=7, aspect=.7)
-        line_plot.set(title=title)
-        # draw a horizontal line
-        if upper_bound:
-            line_plot.axhline(upper_bound)
-        if lower_bound:
-            line_plot.axhline(lower_bound)
+        g = sns.relplot(data=dataframe, x=x, y=y, hue=hue, kind='line')
+
+        (g
+            # draw line into log
+            .map(plt.axhline, y=upper_bound, color=".7", dashes=(2, 1), zorder=0)
+            .map(plt.axhline, y=lower_bound, color=".7", dashes=(2, 1), zorder=0)
+            .set_axis_labels(x_label, y_label)
+            .set_titles(title)
+            .tight_layout(w_pad=0))
+
         # plot the file to given destination
-        file_path = self.result_path + self.img_name
-        line_plot.figure.savefig(file_path)
+        g.figure.savefig(self.file_name_and_path)
+    
+    def plot_matplot(self, x_values, y_values, y_lower, y_upper):
+        """ Create a matplot lineplot with filling between ."""
+        plt.fill_between(x_values, y_lower, y_upper, alpha=0.2) # standard deviation
+        plt.plot(x_values, y_values) # plotted mean 
+        plt.show()
 
 class CSVWriter:
     """Log the network outputs via pandas to a CSV file.
