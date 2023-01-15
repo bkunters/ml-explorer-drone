@@ -2,7 +2,7 @@ from collections import deque
 import time
 import torch
 from torch import nn
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.distributions import MultivariateNormal
 from distutils.util import strtobool
 import numpy as np
@@ -131,6 +131,8 @@ class PPO_PolicyGradient_V1:
         gamma=0.99,
         epsilon=0.22,
         adam_eps=1e-5,
+        momentum=0.9,
+        adam=True,
         render=10,
         save_model=10,
         csv_writer=None,
@@ -151,6 +153,8 @@ class PPO_PolicyGradient_V1:
         self.epsilon = epsilon
         self.adam_eps = adam_eps
         self.gae_lambda = gae_lambda
+        self.momentum = momentum
+        self.adam = adam
 
         # environment
         self.env = env
@@ -182,9 +186,12 @@ class PPO_PolicyGradient_V1:
         self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic) -  (value-based method) "How good the action taken is."
 
         # add optimizer for actor and critic
-        self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p, eps=self.adam_eps) # Setup Policy Network (Actor) optimizer
-        self.value_net_optim = Adam(self.value_net.parameters(), lr=self.lr_v, eps=self.adam_eps)  # Setup Value Network (Critic) optimizer
-
+        if self.adam:
+            self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p, eps=self.adam_eps) # Setup Policy Network (Actor) optimizer
+            self.value_net_optim = Adam(self.value_net.parameters(), lr=self.lr_v, eps=self.adam_eps)  # Setup Value Network (Critic) optimizer  
+        else:
+            self.policy_net_optim = SGD(self.policy_net.parameters(), lr=self.lr_p, momentum=self.momentum)
+            self.value_net_optim = SGD(self.value_net.parameters(), lr=self.lr_v, momentum=self.momentum)
 
 class PPO_PolicyGradient_V2:
     """ Proximal Policy Optimization (PPO) is an online policy gradient method.
@@ -212,6 +219,8 @@ class PPO_PolicyGradient_V2:
         gamma=0.99,
         epsilon=0.22,
         adam_eps=1e-5,
+        momentum=0.9,
+        adam=True,
         render=10,
         save_model=10,
         csv_writer=None,
@@ -220,8 +229,8 @@ class PPO_PolicyGradient_V2:
         device='cpu',
         exp_path='./log/',
         exp_name='PPO_V2_experiment',
-        normalize_advantage=False,
-        normalize_returns=False) -> None:
+        normalize_adv=False,
+        normalize_ret=False) -> None:
         
         # hyperparams
         self.in_dim = in_dim
@@ -236,14 +245,16 @@ class PPO_PolicyGradient_V2:
         self.epsilon = epsilon
         self.adam_eps = adam_eps
         self.gae_lambda = gae_lambda
+        self.momentum = momentum
+        self.adam = adam
 
         # environment
         self.env = env
         self.render_steps = render
         self.save_model = save_model
         self.device = device
-        self.normalize_advantage = normalize_advantage
-        self.normalize_returns = normalize_returns
+        self.normalize_advantage = normalize_adv
+        self.normalize_return = normalize_ret
 
         # keep track of information
         self.exp_path = exp_path
@@ -272,8 +283,12 @@ class PPO_PolicyGradient_V2:
         self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic) -  (value-based method) "How good the action taken is."
 
         # add optimizer for actor and critic
-        self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p, eps=self.adam_eps) # Setup Policy Network (Actor) optimizer
-        self.value_net_optim = Adam(self.value_net.parameters(), lr=self.lr_v, eps=self.adam_eps)  # Setup Value Network (Critic) optimizer
+        if self.adam:
+            self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p, eps=self.adam_eps) # Setup Policy Network (Actor) optimizer
+            self.value_net_optim = Adam(self.value_net.parameters(), lr=self.lr_v, eps=self.adam_eps)  # Setup Value Network (Critic) optimizer  
+        else:
+            self.policy_net_optim = SGD(self.policy_net.parameters(), lr=self.lr_p, momentum=self.momentum)
+            self.value_net_optim = SGD(self.value_net.parameters(), lr=self.lr_v, momentum=self.momentum)
 
     def get_continuous_policy(self, obs):
         """Make function to compute action distribution in continuous action space."""
@@ -309,117 +324,150 @@ class PPO_PolicyGradient_V2:
         action, log_prob, entropy = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
 
-    def cummulative_return(self, batch_rewards):
-        cum_returns = []
-        for rewards in reversed(batch_rewards): # reversed order
-            discounted_reward = 0
-            for reward in reversed(rewards):
-                discounted_reward = reward + (self.gamma * discounted_reward)
-                cum_returns.insert(0, discounted_reward) # reverse it again
-        return torch.tensor(np.array(cum_returns), device=self.device, dtype=torch.float)
-
-    def advantage_estimate(self, batch_rewards, values, normalize_advantage=False, normalized_return=False):
+    def advantage_estimate(self, episode_rewards, values, normalized_adv=False, normalized_ret=False):
         """ Calculating advantage estimate using TD error (Temporal Difference Error).
             TD Error can be used as an estimator for Advantage function,
             - bias-variance: TD has low variance, but IS biased
             - dones: only get reward at end of episode, not disounted next state value
         """
+        # Step 4: Calculate returns
         advantages = []
         cum_returns = []
-        for rewards in reversed(batch_rewards):  # reversed order
+        for rewards in reversed(episode_rewards):  # reversed order
             for reward in reversed(rewards):
                 cum_returns.insert(0, reward) # reverse it again
-        # TD error: A(s,a) = r + (gamma * V(s_t+1)) - V(s_t)
         cum_returns = torch.tensor(np.array(cum_returns), device=self.device, dtype=torch.float)
-        advantages = cum_returns - values
-        if normalize_advantage:
-            advantages = self.normalize_adv(advantages)
-        if normalized_return:
+        if normalized_ret:
             cum_returns = self.normalize_ret(cum_returns)
+        # Step 5: Calculate advantage
+        #  A(s,a) = r - V(s_t)
+        advantages = cum_returns - values
+        if normalized_adv:
+            advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def advantage_reinforce(self, batch_rewards, values, normalized_adv=False, normalized_ret=False):
+    def advantage_reinforce(self, episode_rewards, values, normalized_adv=False, normalized_ret=False):
         """ Advantage Reinforce A(s_t, a_t) = G(t)
         """
-        # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
+        # Returns: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
+        # Example Reinforce: https://github.com/pytorch/examples/blob/main/reinforcement_learning/reinforce.py
+        
+        # Step 4: Calculate returns
         # G(t) is the total disounted reward
         # return value: G(t) = R(t) + gamma * R(t-1)
         cum_returns = []
-        for rewards in reversed(batch_rewards): # reversed order
+        for rewards in reversed(episode_rewards): # reversed order
             discounted_reward = 0
             for reward in reversed(rewards):
                 # R + discount * estimated return from the next step taking action a'
                 discounted_reward = reward + (self.gamma * discounted_reward)
                 cum_returns.insert(0, discounted_reward) # reverse it again
+        cum_returns = torch.tensor(np.array(cum_returns), device=self.device, dtype=torch.float)
+        if normalized_ret:
+            cum_returns = self.normalize_ret(cum_returns)
+        # Step 5: Calculate advantage
+        # A(s,a) = G(t)
         advantages = torch.tensor(np.array(cum_returns), device=self.device, dtype=torch.float)
         # normalize for more stability
         if normalized_adv:
             advantages = self.normalize_adv(advantages)
-        if normalized_ret:
-            cum_returns = self.normalize_ret(cum_returns)
         return advantages, cum_returns
 
-    def advantage_actor_critic(self, batch_rewards, values, normalized_adv=False, normalized_ret=False):
-        """ Advantage Actor-Critic A(s_t, a_t) = G(t) - V(s_t)
-            Calculate delta, which is defined by delta = r - v 
+    def advantage_actor_critic(self, episode_rewards, values, normalized_adv=False, normalized_ret=False):
+        """Advantage Actor-Critic by calculating delta = G(t) - V(s_t)
         """
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
+        # Step 4: Calculate returns
         # G(t) is the total disounted reward
         # return value: G(t) = R(t) + gamma * R(t-1)
         cum_returns = []
-        for rewards in reversed(batch_rewards): # reversed order
+        for rewards in reversed(episode_rewards): # reversed order
             discounted_reward = 0
             for reward in reversed(rewards):
                 # R + discount * estimated return from the next step taking action a'
                 discounted_reward = reward + (self.gamma * discounted_reward)
                 cum_returns.insert(0, discounted_reward) # reverse it again
         cum_returns = torch.tensor(np.array(cum_returns), device=self.device, dtype=torch.float)
-        # delta = G(t) - V(s_t)
-        advantages = cum_returns - values 
-        # normalize for more stability
-        if normalized_adv:
-            advantages = self.normalize_adv(advantages)
+        # normalize returns
         if normalized_ret:
             cum_returns = self.normalize_ret(cum_returns)
+        # Step 5: Calculate advantage
+        # delta = G(t) - V(s_t)
+        advantages = cum_returns - values 
+        # normalize advantage for more stability
+        if normalized_adv:
+            advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def generalized_advantage_estimate_1(self, batch_rewards, values, normalized_adv=False, normalized_ret=False):
-        """ Generalized Advantage Estimate calculation
-            - GAE defines advantage as a weighted average of A_t
-            - advantage measures if an action is better or worse than the policy's default behavior
-            - want to find the maximum Advantage representing the benefit of choosing a specific action
+    def advantage_TD_actor_critic(self, episode_rewards, values, normalized_adv=False, normalized_ret=False):
+        """ Advantage TD Actor-Critic A(s,a) = r + (gamma * V(s_t+1)) - V(s_t)
+            TD Error can be used as an estimator for Advantage function
         """
-        # check if tensor and convert to numpy
-        if torch.is_tensor(batch_rewards):
-            batch_rewards = batch_rewards.detach().numpy()
-        if torch.is_tensor(values):
-            values = values.detach().numpy()
-
-        # STEP 4: compute returns as G(t) = R(t) + gamma * R(t-1)
-        # STEP 5: compute advantage estimates δ_t = − V(s_t) + r_t
-        cum_returns = []
+        # Step 4: Calculate returns
+        # G(t) is the total disounted reward
+        # return value: G(t) = R(t) + gamma * R(t-1)
         advantages = []
-        for rewards in reversed(batch_rewards): # reversed order
-            discounted_reward = 0
-            for i in reversed(range(len(rewards))):
-                discounted_reward = rewards[i] + (self.gamma * discounted_reward)
-                # Hinweis @Thomy Delta Könnte als advantage ausreichen
-                # δ_t = − V(s_t) + r_t
-                delta = discounted_reward - values[i] # delta = r - v
-                advantages.insert(0, delta)
-                cum_returns.insert(0, discounted_reward) # reverse it again
-
-        # convert numpy to torch tensor
+        cum_returns = []
+        for rewards in reversed(episode_rewards):  # reversed order
+            for reward in reversed(rewards):
+                cum_returns.insert(0, reward) # reverse it again
         cum_returns = torch.tensor(np.array(cum_returns), device=self.device, dtype=torch.float)
+        if normalized_ret:
+            cum_returns = self.normalize_ret(cum_returns)
+        # Step 5: Calculate advantage
+        # TD error: A(s,a) = r + (gamma * V(s_t+1)) - V(s_t)
+        last_values = values[-1]
+        for i in reversed(range(len(cum_returns))):
+            # TD residual of V with discount gamma
+            # δ_t = r_t + γ * V(s_t+1) − V(s_t)
+            delta = cum_returns[i] + (self.gamma * last_values) - values[i]
+            advantages.insert(0, delta) # reverse it again
+            last_values = values[i]
         advantages = torch.tensor(np.array(advantages), device=self.device, dtype=torch.float)
         if normalized_adv:
             advantages = self.normalize_adv(advantages)
+        return advantages, cum_returns
+
+    def generalized_advantage_estimate(self, episode_rewards, values, normalized_adv=False, normalized_ret=False):
+        """ The Generalized Advanatage Estimate
+            δ_t = r_t + γ * V(s_t+1) − V(s_t)
+            A_t = δ_t + γ * λ * A(t+1)
+                - GAE allows to balance bias and variance through a weighted average of A_t
+                - gamma (dicount factor): allows reduce variance by downweighting rewards that correspond to delayed effects
+        """
+        advantages = []
+        cum_returns = []#
+        # Step 4: Calculate returns
+        for rewards in reversed(episode_rewards):  # reversed order
+            discounted_reward = 0
+            for reward in reversed(rewards):
+                # R + discount * estimated return from the next step taking action a'
+                discounted_reward = reward + (self.gamma * discounted_reward)
+                cum_returns.insert(0, discounted_reward) # reverse it again
+        cum_returns = torch.tensor(np.array(cum_returns), device=self.device, dtype=torch.float)
         if normalized_ret:
             cum_returns = self.normalize_ret(cum_returns)
+        # Step 5: Calculate advantage
+        # δ_t = r_t + γ * V(s_t+1) − V(s_t)
+        # A_t = δ_t + γ * λ * A(t+1)
+        prev_advantage = 0
+        last_values = values[-1]
+        for i in reversed(range(len(cum_returns))):
+            # TD residual of V with discount gamma
+            # δ_t = r_t + γ * V(s_t+1) − V(s_t)
+            delta = cum_returns[i] + (self.gamma * last_values) - values[i]
+            # discounted sum of Bellman residual term
+            # A_t = δ_t + γ * λ * A(t+1)
+            prev_advantage = delta + (self.gamma * self.gae_lambda * prev_advantage)
+            advantages.insert(0, prev_advantage) # reverse it again
+            last_values = values[i]
+        advantages = torch.tensor(np.array(advantages), device=self.device, dtype=torch.float)
+        if normalized_adv:
+            advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
 
-    def generalized_advantage_estimate_2(self, obs, next_obs, batch_rewards, dones, normalized_adv=False, normalized_ret=False):
+    def generalized_advantage_estimate_2(self, obs, next_obs, episode_rewards, dones, normalized_adv=False, normalized_ret=False):
         """ Generalized Advantage Estimate calculation
             - GAE defines advantage as a weighted average of A_t
             - advantage measures if an action is better or worse than the policy's default behavior
@@ -434,7 +482,7 @@ class PPO_PolicyGradient_V2:
         returns = []
 
         # STEP 4: Calculate cummulated reward
-        for rewards in reversed(batch_rewards):
+        for rewards in reversed(episode_rewards):
             prev_advantage = 0
             returns_current = ns_values[-1]  # V(s_t+1)
             for i in reversed(range(len(rewards))):
@@ -458,60 +506,12 @@ class PPO_PolicyGradient_V2:
         returns = torch.tensor(np.array(returns), device=self.device, dtype=torch.float)
         return advantages, returns
 
-
-    def generalized_advantage_estimate_3(self, batch_rewards, values, dones, normalized_adv=False, normalized_ret=False):
-        """ Calculate advantage as a weighted average of A_t
-                - advantage measures if an action is better or worse than the policy's default behavior
-                - GAE allows to balance bias and variance through a weighted average of A_t
-
-                - gamma (dicount factor): allows reduce variance by downweighting rewards that correspond to delayed effects
-                - done (Tensor): boolean flag for end of episode. TODO: Q&A
-        """
-        # general advantage estimage paper: https://arxiv.org/pdf/1506.02438.pdf
-        # general advantage estimage other: https://nn.labml.ai/rl/ppo/gae.html
-
-        advantages = []
-        returns = []
-        values = values.detach().numpy()
-        for rewards in reversed(batch_rewards): # reversed order
-            prev_advantage = 0
-            discounted_reward = 0
-            last_value = values[-1] # V(s_t+1)
-            for i in reversed(range(len(rewards))):
-                # TODO: Q&A handling of special cases GAE(γ, 0) and GAE(γ, 1)
-                # bei Vetorisierung, bei kurzen Episoden (done flag)
-                # mask if episode completed after step i 
-                mask = 1.0 - dones[i] 
-                last_value = last_value * mask
-                prev_advantage = prev_advantage * mask
-
-                # TD residual of V with discount gamma
-                # δ_t = − V(s_t) + r_t + γ * V(s_t+1)
-                # TODO: Delta Könnte als advantage ausreichen, r - v könnte ausreichen
-                delta = - values[i] + rewards[i] + (self.gamma * last_value)
-                # discounted sum of Bellman residual term
-                # A_t = δ_t + γ * λ * A(t+1)
-                prev_advantage = delta + self.gamma * self.gae_lambda * prev_advantage
-                discounted_reward = rewards[i] + (self.gamma * discounted_reward)
-                returns.insert(0, discounted_reward) # reverse it again
-                advantages.insert(0, prev_advantage) # reverse it again
-                # store current value as V(s_t+1)
-                last_value = values[i]
-
-        advantages = torch.tensor(np.array(advantages), device=self.device, dtype=torch.float)
-        returns = torch.tensor(np.array(returns), device=self.device, dtype=torch.float)
-        if normalized_adv:
-            advantages = self.normalize_adv(advantages)
-        if normalized_ret:
-            cum_returns = self.normalize_ret(cum_returns)
-        return advantages, returns
-
-
     def normalize_adv(self, advantages):
         return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     
     def normalize_ret(self, returns):
-        return (returns - returns.mean()) / returns.std()
+        eps = np.finfo(np.float32).eps.item()
+        return (returns - returns.mean()) / (returns.std() + eps)
 
     def finish_episode(self):
         pass 
@@ -519,7 +519,7 @@ class PPO_PolicyGradient_V2:
     def collect_rollout(self, n_steps=1, render=False):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
         
-        t_step, episode_rewards = 0, []
+        t_step, rewards = 0, []
 
         # log time
         episode_time = []
@@ -530,15 +530,15 @@ class PPO_PolicyGradient_V2:
         episode_actions = []
         episode_action_probs = []
         episode_dones = []
-        batch_rewards = []
-        batch_lens = []
+        episode_rewards = []
+        episode_lens = []
 
         # Run Monte Carlo simulation for n timesteps per batch
         logging.info("Collecting batch trajectories...")
         while t_step < n_steps:
             
-            # rewards collected per episode
-            episode_rewards, done = [], False 
+            # rewards collected
+            rewards, done = [], False 
             obs = self.env.reset()
 
             # measure time elapsed for one episode
@@ -567,7 +567,7 @@ class PPO_PolicyGradient_V2:
                 episode_nextobs.append(__obs)
                 episode_actions.append(action)
                 episode_action_probs.append(log_probability)
-                episode_rewards.append(reward)
+                rewards.append(reward)
                 episode_dones.append(done)
                     
                 obs = __obs
@@ -583,8 +583,8 @@ class PPO_PolicyGradient_V2:
             time_elapsed = end_epoch - start_epoch
             episode_time.append(time_elapsed)
 
-            batch_lens.append(t_episode + 1) # as we started at 0
-            batch_rewards.append(episode_rewards)
+            episode_lens.append(t_episode + 1) # as we started at 0
+            episode_rewards.append(rewards)
 
         # convert trajectories to torch tensors
         obs = torch.tensor(np.array(episode_obs), device=self.device, dtype=torch.float)
@@ -593,7 +593,7 @@ class PPO_PolicyGradient_V2:
         action_log_probs = torch.tensor(np.array(episode_action_probs), device=self.device, dtype=torch.float)
         dones = torch.tensor(np.array(episode_dones), device=self.device, dtype=torch.float)
 
-        return obs, next_obs, actions, action_log_probs, dones, batch_rewards, batch_lens, np.array(episode_time)
+        return obs, next_obs, actions, action_log_probs, dones, episode_rewards, episode_lens, np.array(episode_time)
                 
 
     def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
@@ -616,20 +616,26 @@ class PPO_PolicyGradient_V2:
     def learn(self):
         """"""
         training_steps = 0
-
+        
         while training_steps < self.total_training_steps:
             policy_losses, value_losses = [], []
-            # Collect episode
-            # STEP 3: simulate and collect trajectories --> the following values are all per batch
+
+            # Collect data over one episode
+            # STEP 3: simulate and collect trajectories --> the following values are all per batch over one episode
             obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time = self.collect_rollout(n_steps=self.n_rollout_steps)
 
             # timesteps simulated so far for batch collection
             training_steps += np.sum(ep_lens)
 
-            # STEP 4-5: Calculate cummulated reward and GAE at timestep t_step
+            # STEP 4-5: Calculate cummulated reward and advantage at timestep t_step
             values, _ , _ = self.get_values(obs, actions)
-            advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_returns)
-
+            # advantages, cum_returns = self.advantage_reinforce(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            
+            advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            
+            # advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            
             # update network params 
             for _ in range(self.noptepochs):
                 # STEP 6-7: calculate loss and update weights
@@ -646,7 +652,6 @@ class PPO_PolicyGradient_V2:
             if training_steps % self.save_model == 0:
                 env_name = self.env.unwrapped.spec.id
                 env_model_path = os.path.join(self.exp_path, 'models')
-                print(env_model_path)
                 policy_net_name = os.path.join(env_model_path, f'{env_name}_policyNet.pth')
                 value_net_name = os.path.join(env_model_path, f'{env_name}_valueNet.pth')
                 torch.save({
@@ -675,13 +680,21 @@ class PPO_PolicyGradient_V2:
         # Finalize and plot stats
         if self.stats_plotter:
             df = self.stats_plotter.read_csv() # read all files in folder
-            self.stats_plotter.plot_seaborn_fill(df, x='timestep', y='mean episodic returns', y_min='min episodic returns', y_max='max episodic returns',  title=f'{env_name}', x_label='Timestep', y_label='Mean Episodic Return', color='blue', smoothing=6)
-            # self.stats_plotter.plot_box(df, x='timestep', y='mean episodic runtime', title='title', x_label='Timestep', y_label='Mean Episodic Time')
+            self.stats_plotter.plot_seaborn_fill(df, x='timestep', y='mean episodic returns', 
+                                                y_min='min episodic returns', y_max='max episodic returns',  
+                                                title=f'{env_name}', x_label='Timestep', y_label='Mean Episodic Return', 
+                                                color='blue', smoothing=6, wandb=wandb, xlim_up=self.total_training_steps)
+
+            # self.stats_plotter.plot_box(df, x='timestep', y='mean episodic runtime', 
+            #                             title='title', x_label='Timestep', y_label='Mean Episodic Time', wandb=wandb)
 
         # save files in path
-        wandb.save(self.exp_path)
+        wandb.save(os.path.join(self.exp_path, "*csv"))
+        # Save any files starting with "ppo"
+        wandb.save(os.path.join(wandb.run.dir, "ppo*"))
 
-    def log_stats(self, p_losses, v_losses, batch_return, batch_lens, training_steps, time, exp_name='experiment'):
+
+    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, exp_name='experiment'):
         """Calculate stats and log to W&B, CSV, logger """
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
@@ -692,7 +705,7 @@ class PPO_PolicyGradient_V2:
         # Calculate the stats of an episode
         cum_ret = [np.sum(ep_rews) for ep_rews in batch_return]
         mean_ep_time = round(np.mean(time), 6) 
-        mean_ep_len = round(np.mean(batch_lens), 6)
+        mean_ep_len = round(np.mean(episode_lens), 6)
 
         # statistical values for return
         mean_ep_ret = round(np.mean(cum_ret), 6)
@@ -739,28 +752,18 @@ def arg_parser():
     parser = argparse.ArgumentParser()
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False,
-        help="if toggled, capture video of run")
-    parser.add_argument("--train", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="if toggled, run model in training mode")
-    parser.add_argument("--test", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False,
-        help="if toggled, run model in testing mode")
-    parser.add_argument("--hyperparam", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="if toggled, log hyperparameters")
-    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
-        help="the name of this experiment")
-    parser.add_argument("--gym-id", type=str, default="HalfCheetahBulletEnv-v0",
-        help="the id of the gym environment")
-    parser.add_argument("--learning-rate", type=float, default=3e-4,
-        help="the learning rate of the optimizer")
-    parser.add_argument("--seed", type=int, default=1,
-        help="seed of the experiment")
-    parser.add_argument("--total-timesteps", type=int, default=2000000,
-        help="total timesteps of the experiments")
-    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, cuda will be enabled by default")
+    parser.add_argument("--video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, capture video of run")
+    parser.add_argument("--train", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, run model in training mode")
+    parser.add_argument("--test", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, run model in testing mode")
+    parser.add_argument("--hyperparam", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, log hyperparameters")
+    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"), help="the name of this experiment")
+    parser.add_argument("--project-name", type=str, default='OpenAIGym-PPO', help="the name of this project") 
+    parser.add_argument("--gym-id", type=str, default="Pendulum-v1", help="the id of the gym environment")
+    parser.add_argument("--learning-rate", type=float, default=3e-4, help="the learning rate of the optimizer")
+    parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
+    parser.add_argument("--total-timesteps", type=int, default=2000000, help="total timesteps of the experiments")
+    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
+    parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
     
     # Parse arguments if they are given
     args = parser.parse_args()
@@ -858,7 +861,7 @@ def _log_summary(ep_len, ep_ret, ep_num):
 def train(env, in_dim, out_dim, total_training_steps, max_batch_size, n_rollout_steps,
           noptepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
           adam_epsilon, render_steps, save_steps, csv_writer, stats_plotter,
-          normalize_advantage=False, normalize_returns=False,
+          normalize_adv=False, normalize_ret=False,
           log_video=False, ppo_version='v2', device='cpu', exp_path='./log/', exp_name='PPO-experiment'):
     """Train the policy network (actor) and the value network (critic) with PPO"""
     agent = None
@@ -877,8 +880,8 @@ def train(env, in_dim, out_dim, total_training_steps, max_batch_size, n_rollout_
                     gamma=gamma,
                     epsilon=epsilon,
                     adam_eps=adam_epsilon,
-                    normalize_advantage=normalize_advantage,
-                    normalize_returns=normalize_returns,
+                    normalize_adv=normalize_adv,
+                    normalize_ret=normalize_ret,
                     render=render_steps,
                     save_model=save_steps,
                     csv_writer=csv_writer,
@@ -960,10 +963,10 @@ if __name__ == '__main__':
     create_path(RESULTS_PATH)
     
     # Hyperparameter
-    total_training_steps = 1_000_000     # time steps regarding batches collected and train agent
+    total_training_steps = 3_000_000     # time steps regarding batches collected and train agent
     max_batch_size = 512                 # max number of episode samples to be sampled per time step. 
     n_rollout_steps = 2048               # number of batches per episode, or experiences to collect per environment
-    noptepochs = 12                      # Number of epochs per time step to optimize the neural networks
+    noptepochs = 32                      # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4               # learning rate for policy network
     learning_rate_v = 1e-3               # learning rate for value network
     gae_lambda = 0.95                    # factor for trade-off of bias vs variance for GAE
@@ -974,10 +977,11 @@ if __name__ == '__main__':
     env_name = 'Pendulum-v1'             # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
     env_number = 1                       # number of actors
     seed = 42                            # seed gym, env, torch, numpy 
-    normalize_advantage = True           # wether to normalize the advantage estimate
-    normalize_returns = False            # wether to normalize the return function
+    normalize_adv = False                # wether to normalize the advantage estimate
+    normalize_ret = True                 # wether to normalize the return function
+    
     # setup for torch save models and rendering
-    render = True
+    render = False
     render_steps = 10
     save_steps = 100
 
@@ -1032,7 +1036,7 @@ if __name__ == '__main__':
 
     # Monitoring with W&B
     wandb.init(
-            project=f'drone-mechanics-ppo-OpenAIGym',
+            project=args.project_name,
             entity='drone-mechanics',
             sync_tensorboard=True,
             config={ # stores hyperparams in job
@@ -1054,12 +1058,13 @@ if __name__ == '__main__':
                 'gamma (discount)': gamma,
                 'epsilon (clipping)': epsilon,
                 'gae lambda (GAE)': gae_lambda,
-                'normalize advantage': normalize_advantage,
-                'normalize return': normalize_returns,
+                'normalize advantage': normalize_adv,
+                'normalize return': normalize_ret,
                 'seed': seed,
                 'experiment path': exp_folder_name,
                 'experiment name': args.exp_name
             },
+            dir=os.getcwd(),
             name=exp_name, # needs flag --exp-name
             monitor_gym=True,
             save_code=True
@@ -1080,8 +1085,8 @@ if __name__ == '__main__':
             gamma=gamma,
             epsilon=epsilon,
             adam_epsilon=adam_epsilon,
-            normalize_advantage=normalize_advantage,
-            normalize_returns=normalize_returns,
+            normalize_adv=normalize_adv,
+            normalize_ret=normalize_ret,
             render_steps=render_steps,
             save_steps=save_steps,
             csv_writer=csv_writer,

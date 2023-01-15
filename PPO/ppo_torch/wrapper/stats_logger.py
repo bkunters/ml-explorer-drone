@@ -9,6 +9,8 @@ import os
 # switch style
 sns.set_theme()
 sns.set_context("notebook", font_scale=1.5, rc={"lines.linewidth": 2.5})
+diverging_colors = sns.color_palette("RdBu", 10)
+
 # setup plotting 
 plt.rcParams["figure.figsize"] = [12.50, 9.50]
 plt.rcParams["figure.autolayout"] = True
@@ -54,7 +56,8 @@ class StatsPlotter:
         df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
         return df
 
-    def plot_box(self, dataframe, x, y, title='title', x_label='Timestep', y_label='Mean Episodic Time'):        
+    def plot_box(self, dataframe, x, y, title='title', x_label='Timestep', y_label='Mean Episodic Time', wandb=None):
+        """Create a box plot for time needed to converge per experiment."""     
         # get exp names
         df_exp = dataframe['experiment'].values.astype('str')
         df_exp_unique = list(dict.fromkeys(df_exp))
@@ -67,35 +70,42 @@ class StatsPlotter:
         ax.figure.savefig(self.file_name_and_path)
         plt.show()
 
-    def plot_seaborn_fill(self, dataframe, x, y, y_min, y_max, title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=0, lower_bound=-1800, ylim_low=-2000, ylim_up=200, color='blue', smoothing=2):
+        if wandb:
+            wandb.log({'Mean Episodic Time': plt})
+
+    def plot_seaborn_fill(self, dataframe, x, y, y_min, y_max, title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=0, lower_bound=-1800, xlim_up=3_000_000, ylim_low=-2000, ylim_up=200, color='blue', smoothing=2, wandb=None):
         # get values from df
         # add smoothing
         df_min = gaussian_filter1d(dataframe[y_min].to_numpy(), sigma=smoothing)
         df_max = gaussian_filter1d(dataframe[y_max].to_numpy(), sigma=smoothing)
-        df_x = dataframe[x].to_numpy()
+        df_x = dataframe[x].to_numpy(dtype=int)
         df_y = gaussian_filter1d(dataframe[y].to_numpy(), sigma=smoothing)
         # get exp names
         df_exp = dataframe['experiment'].values.astype('str')
         df_exp_unique = list(dict.fromkeys(df_exp))
 
         # draw mean line
-        ax = sns.lineplot(x=df_x, y=df_y)
+        ax = sns.lineplot(x=df_x, y=df_y, lw=2)
         # fill std
         ax.fill_between(x=df_x, y1=df_min, y2=df_max, color=sns.xkcd_rgb[color], alpha=0.2)
         # draw upper and lower bounds
         ax.axhline(lower_bound, linewidth=1, color='red', label='lower bound')
-        ax.axhline(upper_bound, linewidth=1, color='red', label='upper bound')
-        ax.set(title=title, xlabel=x_label, ylabel=y_label, ylim=(ylim_low, ylim_up))
-
+        ax.axhline(upper_bound, linewidth=1, color='red', label='upper bound')        
+        # change x-y axis scale
+        ax.set(title=title, xlabel=x_label, ylabel=y_label, xlim=(0, xlim_up), ylim=(ylim_low, ylim_up))
         # set legend
         plt.legend(labels=df_exp_unique, loc='upper right')
 
         # plot the file to given destination
         ax.figure.savefig(self.file_name_and_path)
         plt.show()
+        
+        if wandb:
+            images = wandb.Image(plt)
+            wandb.log({'Mean Episodic Return': images})
 
 
-    def plot_seaborn(self, dataframe, x, y, hue='hue', title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=0, lower_bound=-1800):
+    def plot_seaborn(self, dataframe, x, y, hue='hue', title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=0, lower_bound=-1800, wandb=None):
         """ Create a lineplot with seaborn.
             Doc: https://seaborn.pydata.org/tutorial/introduction
         """
@@ -111,12 +121,23 @@ class StatsPlotter:
 
         # plot the file to given destination
         g.figure.savefig(self.file_name_and_path)
+        plt.show()
+
+        if wandb:
+            wandb.log({'Mean Episodic Return': plt})
     
-    def plot_matplot(self, x_values, y_values, y_lower, y_upper):
+    def plot_matplot(self, x_values, y_values, y_lower, y_upper, wandb=None):
         """ Create a matplot lineplot with filling between ."""
         plt.fill_between(x_values, y_lower, y_upper, alpha=0.2) # standard deviation
         plt.plot(x_values, y_values) # plotted mean 
         plt.show()
+
+        if wandb:
+            wandb.log({'Mean Episodic Return': plt})
+    
+    def get_random_col(self):
+        colour = (np.random.random(), np.random.random(), np.random.random())
+        return colour
 
 class CSVWriter:
     """Log the network outputs via pandas to a CSV file.
