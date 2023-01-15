@@ -31,7 +31,7 @@ from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.envs.single_agent_rl.TakeoffAviary import TakeoffAviary
 from gym_pybullet_drones.utils.utils import sync, str2bool
 
-import ppo_tf
+import ppo
 
 DEFAULT_RLLIB = True
 DEFAULT_GUI = True
@@ -76,8 +76,8 @@ def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI
                                                                                    )
                   )
         policy = agent.get_policy()'''
-        ppo_tf.env_name = "takeoff-aviary-v0"
-        ppo_tf.train()
+        ppo.env_name = "takeoff-aviary-v0"
+        ppo.train()
         ray.shutdown()
 
     #### Show (and record a video of) the model's performance ##
@@ -97,7 +97,7 @@ def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI
                                             deterministic=True
                                             )
         else:
-            action = ppo_tf.policy_net(obs.reshape(1,ppo_tf.input_length_net))
+            action = ppo.policy_net(obs.reshape(1,ppo_tf.input_length_net))
         obs, reward, done, info = env.step(action)
         logger.log(drone=0,
                    timestamp=i/env.SIM_FREQ,

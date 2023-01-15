@@ -122,9 +122,9 @@ class PPO_PolicyGradient_V1:
         in_dim, 
         out_dim,
         total_training_steps,
-        max_batch_size,
+        batch_size,
         n_rollout_steps,
-        noptepochs=5,
+        n_optepochs=5,
         lr_p=1e-3,
         lr_v=1e-3,
         gae_lambda=0.95,
@@ -144,9 +144,9 @@ class PPO_PolicyGradient_V1:
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.total_training_steps = total_training_steps
-        self.max_batch_size = max_batch_size
+        self.batch_size = batch_size
         self.n_rollout_steps = n_rollout_steps
-        self.noptepochs = noptepochs
+        self.n_optepochs = n_optepochs
         self.lr_p = lr_p
         self.lr_v = lr_v
         self.gamma = gamma
@@ -166,7 +166,7 @@ class PPO_PolicyGradient_V1:
         self.log_video = log_video
 
         # keep track of rewards per episode
-        self.ep_returns = deque(maxlen=max_batch_size)
+        self.ep_returns = deque(maxlen=batch_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
         self.stats_data = {
@@ -179,6 +179,7 @@ class PPO_PolicyGradient_V1:
             'min episodic returns': [],
             'max episodic returns': [],
             'std episodic returns': [],
+            'episodes': []
             }
 
         # add net for actor and critic
@@ -194,11 +195,30 @@ class PPO_PolicyGradient_V1:
             self.value_net_optim = SGD(self.value_net.parameters(), lr=self.lr_v, momentum=self.momentum)
 
 class PPO_PolicyGradient_V2:
-    """ Proximal Policy Optimization (PPO) is an online policy gradient method.
+    """ Proximal Policy Optimization algorithm (PPO) (clip version)
+        
+        Paper: https://arxiv.org/abs/1707.06347
+        Stable Baseline: https://github.com/hill-a/stable-baselines
+        
+        Proximal Policy Optimization (PPO) is an online policy gradient method.
         As an online policy method it updates the policy and then discards the experience (no replay buffer).
         Thus the agent does well in environments with dense reward signals.
         The clipped objective function in PPO allows to keep the policy close to the policy 
-        that was used to sample the data resulting in a more stable training. 
+        that was used to sample the data resulting in a more stable training.
+
+        :param env: The environment to learn from (if registered in Gym)
+        :param learning_rate: The learning rate, it can be a function
+        of the current progress remaining (from 1 to 0)
+        :param batch_size: Minibatch size of collected experiences
+        :param n_optepochs: Number of epoch when optimizing the surrogate loss
+        :param gamma: Discount factor
+        :param gae_lambda: Factor for trade-off of bias vs variance for Generalized Advantage Estimator
+        :param epsilon: Clipping parameter, it can be a function of the current progress
+        remaining (from 1 to 0).
+        :param normalize_advantage: Whether to normalize or not the advantage
+        :param normalize_returns: Whether to normalize or not the return
+        :param device: Device (cpu, cuda, ...) on which the code should be run.
+        Setting it to auto, the code will be run on the GPU if possible.
     """
     # Further reading
     # PPO experiments: https://nn.labml.ai/rl/ppo/experiment.html
@@ -210,9 +230,9 @@ class PPO_PolicyGradient_V2:
         in_dim, 
         out_dim,
         total_training_steps,
-        max_batch_size,
+        batch_size,
         n_rollout_steps,
-        noptepochs=5,
+        n_optepochs=5,
         lr_p=1e-3,
         lr_v=1e-3,
         gae_lambda=0.95,
@@ -221,7 +241,8 @@ class PPO_PolicyGradient_V2:
         adam_eps=1e-5,
         momentum=0.9,
         adam=True,
-        render=10,
+        render_steps=10,
+        render=False,
         save_model=10,
         csv_writer=None,
         stats_plotter=None,
@@ -236,9 +257,9 @@ class PPO_PolicyGradient_V2:
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.total_training_steps = total_training_steps
-        self.max_batch_size = max_batch_size
+        self.batch_size = batch_size
         self.n_rollout_steps = n_rollout_steps
-        self.noptepochs = noptepochs
+        self.n_optepochs = n_optepochs
         self.lr_p = lr_p
         self.lr_v = lr_v
         self.gamma = gamma
@@ -250,7 +271,8 @@ class PPO_PolicyGradient_V2:
 
         # environment
         self.env = env
-        self.render_steps = render
+        self.render_steps = render_steps
+        self.render = render
         self.save_model = save_model
         self.device = device
         self.normalize_advantage = normalize_adv
@@ -263,7 +285,7 @@ class PPO_PolicyGradient_V2:
         self.log_video = log_video
 
         # keep track of rewards per episode
-        self.ep_returns = deque(maxlen=max_batch_size)
+        self.ep_returns = deque(maxlen=batch_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
         self.stats_data = {
@@ -276,6 +298,7 @@ class PPO_PolicyGradient_V2:
             'min episodic returns': [],
             'max episodic returns': [],
             'std episodic returns': [],
+            'episodes': [],
             }
 
         # add net for actor and critic
@@ -547,7 +570,7 @@ class PPO_PolicyGradient_V2:
 
             # Run episode for a fixed amount of timesteps
             # to keep rollout size fixed and episodes independent
-            for t_episode in range(0, self.max_batch_size):
+            for t_episode in range(0, self.batch_size):
                 # render gym envs
                 if render and t_episode % self.render_steps == 0:
                     self.env.render()
@@ -616,28 +639,30 @@ class PPO_PolicyGradient_V2:
     def learn(self):
         """"""
         training_steps = 0
-        
+        done_so_far = 0
         while training_steps < self.total_training_steps:
             policy_losses, value_losses = [], []
 
             # Collect data over one episode
+            # Episode = recording of actions and states that an agent performed from a start state to an end state
             # STEP 3: simulate and collect trajectories --> the following values are all per batch over one episode
-            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time = self.collect_rollout(n_steps=self.n_rollout_steps)
+            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time = self.collect_rollout(n_steps=self.n_rollout_steps, render=self.render)
 
-            # timesteps simulated so far for batch collection
+            # experiences simulated so far
             training_steps += np.sum(ep_lens)
 
             # STEP 4-5: Calculate cummulated reward and advantage at timestep t_step
             values, _ , _ = self.get_values(obs, actions)
+
+            # Advantage functions
             # advantages, cum_returns = self.advantage_reinforce(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
-            advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            
-            # advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
             # update network params 
-            for _ in range(self.noptepochs):
+            for _ in range(self.n_optepochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs, _ = self.get_values(obs, actions)
                 policy_loss, value_loss = self.train(values, cum_returns, advantages, batch_log_probs, curr_log_probs, self.epsilon)
@@ -646,7 +671,9 @@ class PPO_PolicyGradient_V2:
                 value_losses.append(value_loss.detach().numpy())
 
             # log all statistical values to CSV
-            self.log_stats(policy_losses, value_losses, rewards, ep_lens, training_steps, ep_time, exp_name=self.exp_name)
+            self.log_stats(policy_losses, value_losses, rewards, ep_lens, training_steps, ep_time, done_so_far, exp_name=self.exp_name)
+            
+            done_so_far += 1
 
             # store model with checkpoints
             if training_steps % self.save_model == 0:
@@ -687,14 +714,14 @@ class PPO_PolicyGradient_V2:
 
             # self.stats_plotter.plot_box(df, x='timestep', y='mean episodic runtime', 
             #                             title='title', x_label='Timestep', y_label='Mean Episodic Time', wandb=wandb)
+        if wandb:
+            # save files in path
+            wandb.save(os.path.join(self.exp_path, "*csv"))
+            # Save any files starting with "ppo"
+            wandb.save(os.path.join(wandb.run.dir, "ppo*"))
 
-        # save files in path
-        wandb.save(os.path.join(self.exp_path, "*csv"))
-        # Save any files starting with "ppo"
-        wandb.save(os.path.join(wandb.run.dir, "ppo*"))
 
-
-    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, exp_name='experiment'):
+    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, done_so_far, exp_name='experiment'):
         """Calculate stats and log to W&B, CSV, logger """
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
@@ -716,6 +743,7 @@ class PPO_PolicyGradient_V2:
         std_ep_rew = round(np.std(cum_ret), 6)
 
         # Log stats to CSV file
+        self.stats_data['episodes'].append(done_so_far)
         self.stats_data['experiment'].append(exp_name)
         self.stats_data['mean episodic length'].append(mean_ep_len)
         self.stats_data['mean episodic returns'].append(mean_ep_ret)
@@ -734,7 +762,8 @@ class PPO_PolicyGradient_V2:
             'train/mean episode returns': mean_ep_ret,
             'train/std episode returns': std_ep_rew,
             'train/mean episode runtime': mean_ep_time,
-            'train/mean episode length': mean_ep_len
+            'train/mean episode length': mean_ep_len,
+            'train/episodes': done_so_far
         })
 
         logging.info('\n')
@@ -858,11 +887,11 @@ def _log_summary(ep_len, ep_ret, ep_num):
         logging.info(f"--------------------------------------------")
         logging.info('\n')
 
-def train(env, in_dim, out_dim, total_training_steps, max_batch_size, n_rollout_steps,
-          noptepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
-          adam_epsilon, render_steps, save_steps, csv_writer, stats_plotter,
-          normalize_adv=False, normalize_ret=False,
-          log_video=False, ppo_version='v2', device='cpu', exp_path='./log/', exp_name='PPO-experiment'):
+def train(env, in_dim, out_dim, total_training_steps, batch_size, n_rollout_steps,
+          n_optepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
+          adam_epsilon, render_steps, render, save_steps, csv_writer, stats_plotter,
+          normalize_adv=False, normalize_ret=False, log_video=False, ppo_version='v2', 
+          device='cpu', exp_path='./log/', exp_name='PPO-experiment'):
     """Train the policy network (actor) and the value network (critic) with PPO"""
     agent = None
     if ppo_version == 'v2':
@@ -871,9 +900,9 @@ def train(env, in_dim, out_dim, total_training_steps, max_batch_size, n_rollout_
                     in_dim=in_dim, 
                     out_dim=out_dim,
                     total_training_steps=total_training_steps,
-                    max_batch_size=max_batch_size,
+                    batch_size=batch_size,
                     n_rollout_steps=n_rollout_steps,
-                    noptepochs=noptepochs,
+                    n_optepochs=n_optepochs,
                     lr_p=learning_rate_p,
                     lr_v=learning_rate_v,
                     gae_lambda = gae_lambda,
@@ -882,7 +911,8 @@ def train(env, in_dim, out_dim, total_training_steps, max_batch_size, n_rollout_
                     adam_eps=adam_epsilon,
                     normalize_adv=normalize_adv,
                     normalize_ret=normalize_ret,
-                    render=render_steps,
+                    render_steps=render_steps,
+                    render=render,
                     save_model=save_steps,
                     csv_writer=csv_writer,
                     stats_plotter=stats_plotter,
@@ -896,9 +926,9 @@ def train(env, in_dim, out_dim, total_training_steps, max_batch_size, n_rollout_
                     in_dim=in_dim, 
                     out_dim=out_dim,
                     total_training_steps=total_training_steps,
-                    max_batch_size=max_batch_size,
+                    batch_size=batch_size,
                     n_rollout_steps=n_rollout_steps,
-                    noptepochs=noptepochs,
+                    n_optepochs=n_optepochs,
                     lr_p=learning_rate_p,
                     lr_v=learning_rate_v,
                     gae_lambda = gae_lambda,
@@ -934,9 +964,9 @@ def hyperparam_tuning(config=None):
                 in_dim=config.obs_dim, 
                 out_dim=config.act_dim,
                 total_training_steps=config.total_training_steps,
-                max_batch_size=config.max_batch_size,
+                batch_size=config.batch_size,
                 n_rollout_steps=config.n_rollout_steps,
-                noptepochs=config.noptepochs,
+                n_optepochs=config.n_optepochs,
                 gae_lambda = config.gae_lambda,
                 gamma=config.gamma,
                 epsilon=config.epsilon,
@@ -964,20 +994,20 @@ if __name__ == '__main__':
     
     # Hyperparameter
     total_training_steps = 3_000_000     # time steps regarding batches collected and train agent
-    max_batch_size = 512                 # max number of episode samples to be sampled per time step. 
+    batch_size = 512                 # max number of episode samples to be sampled per time step. 
     n_rollout_steps = 2048               # number of batches per episode, or experiences to collect per environment
-    noptepochs = 32                      # Number of epochs per time step to optimize the neural networks
+    n_optepochs = 32                      # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4               # learning rate for policy network
     learning_rate_v = 1e-3               # learning rate for value network
     gae_lambda = 0.95                    # factor for trade-off of bias vs variance for GAE
     gamma = 0.99                         # discount factor
     adam_epsilon = 1e-8                  # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
     epsilon = 0.2                        # clipping factor
-    clip_range_vf = 0.2                  # clipping factor for the value function. Depends on reward scaling.
-    env_name = 'Pendulum-v1'             # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
+    clip_range_vf = 0.2                  # clipping factor for the value loss function. Depends on reward scaling.
+    env_name = 'Pendulum-v1'             # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0', 'takeoff-aviary-v0'
     env_number = 1                       # number of actors
     seed = 42                            # seed gym, env, torch, numpy 
-    normalize_adv = False                # wether to normalize the advantage estimate
+    normalize_adv = True                 # wether to normalize the advantage estimate
     normalize_ret = True                 # wether to normalize the return function
     
     # setup for torch save models and rendering
@@ -1043,9 +1073,9 @@ if __name__ == '__main__':
                 'env name': env_name,
                 'env number': env_number,
                 'total number of steps': total_training_steps,
-                'max sampled trajectories': max_batch_size,
+                'max sampled trajectories': batch_size,
                 'batches per episode': n_rollout_steps,
-                'number of epochs for update': noptepochs,
+                'number of epochs for update': n_optepochs,
                 'input layer size': obs_dim,
                 'output layer size': act_dim,
                 'observation space': obs_shape,
@@ -1076,9 +1106,9 @@ if __name__ == '__main__':
             in_dim=obs_dim, 
             out_dim=act_dim,
             total_training_steps=total_training_steps,
-            max_batch_size=max_batch_size,
+            batch_size=batch_size,
             n_rollout_steps=n_rollout_steps,
-            noptepochs=noptepochs,
+            n_optepochs=n_optepochs,
             learning_rate_p=learning_rate_p, 
             learning_rate_v=learning_rate_v,
             gae_lambda = gae_lambda,
@@ -1088,6 +1118,7 @@ if __name__ == '__main__':
             normalize_adv=normalize_adv,
             normalize_ret=normalize_ret,
             render_steps=render_steps,
+            render=args.video,
             save_steps=save_steps,
             csv_writer=csv_writer,
             stats_plotter=stats_plotter,

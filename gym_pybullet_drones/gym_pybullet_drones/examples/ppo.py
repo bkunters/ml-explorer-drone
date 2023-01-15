@@ -1,14 +1,19 @@
 from collections import deque
 import time
+from gym_pybullet_drones.envs.single_agent_rl.TakeoffAviary import TakeoffAviary
 import torch
 from torch import nn
 from torch.optim import Adam, SGD
 from torch.distributions import MultivariateNormal
+from distutils.util import strtobool
 import numpy as np
+from datetime import datetime
 import os
+import argparse
 
 # gym environment
 import gym
+from ray.tune import register_env
 
 # logging python
 import logging
@@ -16,16 +21,181 @@ import sys
 
 # monitoring/logging ML
 import wandb
+from stats_logger import StatsPlotter, CSVWriter
 
 # hyperparameter tuning
 import optuna
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
-# own implementations
-from ppo_torch.network import PolicyNet, ValueNet
-from wrapper.stats_logger import StatsPlotter
-from wrapper.stats_logger import CSVWriter
+# Paths and other constants
+MODEL_PATH = './models/'
+LOG_PATH = './log/'
+VIDEO_PATH = './video/'
+RESULTS_PATH = './results/'
 
+DEFAULT_GUI = True
+DEFAULT_RECORD_VIDEO = False
+
+# get current date and time
+CURR_DATE = datetime.today().strftime('%Y-%m-%d')
+CURR_TIME = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+####################
+####### TODO #######
+####################
+
+# Hint: Please if working on it mark a todo as (done) if done
+# 1) Check current implementation against article: https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/
+# 3) Check calculation of advantage and GAE
+
+####################
+####################
+
+
+class Net(nn.Module):
+    def __init__(self) -> None:
+        super(Net, self).__init__()
+
+class ValueNet(Net):
+    """Setup Value Network (Critic) optimizer"""
+    def __init__(self, in_dim, out_dim) -> None:
+        super(ValueNet, self).__init__()
+        self.layer1 = layer_init(nn.Linear(in_dim, 64))
+        self.layer2 = layer_init(nn.Linear(64, 64))
+        self.layer3 = layer_init(nn.Linear(64, out_dim), std=1.0)
+        self.relu = nn.ReLU()
+    
+    def forward(self, obs):
+        if isinstance(obs, np.ndarray):
+            obs = torch.tensor(obs, dtype=torch.float)
+        x = self.relu(self.layer1(obs))
+        x = self.relu(self.layer2(x))
+        out = self.layer3(x) # head has linear activation
+        return out
+    
+    def loss(self, values, returns):
+        """ Objective function defined by mean-squared error.
+            ValueNet is approximated via regression.
+            Regression target y(t) is defined by Bellman equation or G(t) sample return
+        """
+        # return 0.5 * ((returns - values)**2).mean() # MSE loss
+        return nn.MSELoss()(values, returns)
+
+class PolicyNet(Net):
+    """Setup Policy Network (Actor)"""
+    def __init__(self, in_dim, out_dim) -> None:
+        super(PolicyNet, self).__init__()
+        self.layer1 = layer_init(nn.Linear(in_dim, 64))
+        self.layer2 = layer_init(nn.Linear(64, 64))
+        self.layer3 = layer_init(nn.Linear(64, out_dim), std=0.01)
+        self.relu = nn.ReLU()
+
+    def forward(self, obs):
+        if isinstance(obs, np.ndarray):
+            obs = torch.tensor(obs, dtype=torch.float)
+        x = self.relu(self.layer1(obs))
+        x = self.relu(self.layer2(x))
+        out = self.layer3(x) # head has linear activation (continuous space)
+        return out
+    
+    def loss(self, advantages, batch_log_probs, curr_log_probs, clip_eps=0.2):
+        """ Make the clipped surrogate objective function to compute policy loss.
+                - The ratio is clipped to be close to 1. 
+                - The clipping ensures that the update will not be too large so that training is more stable.
+                - The minimum is taken, so that the gradient will pull π_new towards π_OLD 
+                  if the ratio is not between 1-ϵ and 1+ϵ.
+        """
+        # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
+        ratio = torch.exp(curr_log_probs - batch_log_probs)
+        clip_1 = ratio * advantages
+        clip_2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * advantages
+        policy_loss = (-torch.min(clip_1, clip_2)) # negative as Adam mins loss, but we want to max it
+        # calc clip frac
+        self.clip_fraction = (abs((ratio - 1.0)) > clip_eps).to(torch.float).mean()
+        return policy_loss.mean() # return mean
+
+
+####################
+####################
+
+class PPO_PolicyGradient_V1:
+
+    def __init__(self, 
+        env, 
+        in_dim, 
+        out_dim,
+        total_training_steps,
+        max_batch_size,
+        n_rollout_steps,
+        noptepochs=5,
+        lr_p=1e-3,
+        lr_v=1e-3,
+        gae_lambda=0.95,
+        gamma=0.99,
+        epsilon=0.22,
+        adam_eps=1e-5,
+        momentum=0.9,
+        adam=True,
+        render=10,
+        save_model=10,
+        csv_writer=None,
+        stats_plotter=None,
+        log_video=False,
+        device='cpu') -> None:
+        
+        # hyperparams
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.total_training_steps = total_training_steps
+        self.max_batch_size = max_batch_size
+        self.n_rollout_steps = n_rollout_steps
+        self.noptepochs = noptepochs
+        self.lr_p = lr_p
+        self.lr_v = lr_v
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.adam_eps = adam_eps
+        self.gae_lambda = gae_lambda
+        self.momentum = momentum
+        self.adam = adam
+
+        # environment
+        self.env = env
+        self.render_steps = render
+        self.save_model = save_model
+        self.device = device
+
+        # track video of gym
+        self.log_video = log_video
+
+        # keep track of rewards per episode
+        self.ep_returns = deque(maxlen=max_batch_size)
+        self.csv_writer = csv_writer
+        self.stats_plotter = stats_plotter
+        self.stats_data = {
+            'experiment': [], 
+            'timestep': [],
+            'mean episodic runtime': [],
+            'mean episodic length': [],
+            'eval episodes': [],
+            'mean episodic returns': [],
+            'min episodic returns': [],
+            'max episodic returns': [],
+            'std episodic returns': [],
+            }
+
+        # add net for actor and critic
+        self.policy_net = PolicyNet(self.in_dim, self.out_dim) # Setup Policy Network (Actor) - (policy-based method) "How the agent behaves"
+        self.value_net = ValueNet(self.in_dim, 1) # Setup Value Network (Critic) -  (value-based method) "How good the action taken is."
+
+        # add optimizer for actor and critic
+        if self.adam:
+            self.policy_net_optim = Adam(self.policy_net.parameters(), lr=self.lr_p, eps=self.adam_eps) # Setup Policy Network (Actor) optimizer
+            self.value_net_optim = Adam(self.value_net.parameters(), lr=self.lr_v, eps=self.adam_eps)  # Setup Value Network (Critic) optimizer  
+        else:
+            self.policy_net_optim = SGD(self.policy_net.parameters(), lr=self.lr_p, momentum=self.momentum)
+            self.value_net_optim = SGD(self.value_net.parameters(), lr=self.lr_v, momentum=self.momentum)
 
 class PPO_PolicyGradient_V2:
     """ Proximal Policy Optimization (PPO) is an online policy gradient method.
@@ -55,7 +225,8 @@ class PPO_PolicyGradient_V2:
         adam_eps=1e-5,
         momentum=0.9,
         adam=True,
-        render=10,
+        render_steps=10,
+        render=False,
         save_model=10,
         csv_writer=None,
         stats_plotter=None,
@@ -64,7 +235,8 @@ class PPO_PolicyGradient_V2:
         exp_path='./log/',
         exp_name='PPO_V2_experiment',
         normalize_adv=False,
-        normalize_ret=False) -> None:
+        normalize_ret=False,
+        wandb=None) -> None:
         
         # hyperparams
         self.in_dim = in_dim
@@ -84,7 +256,8 @@ class PPO_PolicyGradient_V2:
 
         # environment
         self.env = env
-        self.render_steps = render
+        self.render_steps = render_steps
+        self.render = render
         self.save_model = save_model
         self.device = device
         self.normalize_advantage = normalize_adv
@@ -95,6 +268,7 @@ class PPO_PolicyGradient_V2:
         self.exp_name = exp_name
         # track video of gym
         self.log_video = log_video
+        self.wandb = wandb
 
         # keep track of rewards per episode
         self.ep_returns = deque(maxlen=max_batch_size)
@@ -456,7 +630,7 @@ class PPO_PolicyGradient_V2:
 
             # Collect data over one episode
             # STEP 3: simulate and collect trajectories --> the following values are all per batch over one episode
-            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time = self.collect_rollout(n_steps=self.n_rollout_steps)
+            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time = self.collect_rollout(n_steps=self.n_rollout_steps, render=self.render)
 
             # timesteps simulated so far for batch collection
             training_steps += np.sum(ep_lens)
@@ -465,10 +639,9 @@ class PPO_PolicyGradient_V2:
             values, _ , _ = self.get_values(obs, actions)
             # advantages, cum_returns = self.advantage_reinforce(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
-            advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            
-            # advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
             # update network params 
             for _ in range(self.noptepochs):
@@ -480,7 +653,7 @@ class PPO_PolicyGradient_V2:
                 value_losses.append(value_loss.detach().numpy())
 
             # log all statistical values to CSV
-            self.log_stats(policy_losses, value_losses, rewards, ep_lens, training_steps, ep_time, exp_name=self.exp_name)
+            self.log_stats(policy_losses, value_losses, rewards, ep_lens, training_steps, ep_time, exp_name=self.exp_name, wandb=self.wandb)
 
             # store model with checkpoints
             if training_steps % self.save_model == 0:
@@ -501,9 +674,9 @@ class PPO_PolicyGradient_V2:
                     'loss': value_loss,
                     }, value_net_name)
 
-                if wandb:
-                    wandb.save(policy_net_name)
-                    wandb.save(value_net_name)
+                if self.wandb:
+                    self.wandb.save(policy_net_name)
+                    self.wandb.save(value_net_name)
 
                 # Log to CSV
                 if self.csv_writer:
@@ -521,14 +694,14 @@ class PPO_PolicyGradient_V2:
 
             # self.stats_plotter.plot_box(df, x='timestep', y='mean episodic runtime', 
             #                             title='title', x_label='Timestep', y_label='Mean Episodic Time', wandb=wandb)
+        if self.wandb:
+            # save files in path
+            wandb.save(os.path.join(self.exp_path, "*csv"))
+            # Save any files starting with "ppo"
+            wandb.save(os.path.join(wandb.run.dir, "ppo*"))
 
-        # save files in path
-        wandb.save(os.path.join(self.exp_path, "*csv"))
-        # Save any files starting with "ppo"
-        wandb.save(os.path.join(wandb.run.dir, "ppo*"))
 
-
-    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, exp_name='experiment'):
+    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, exp_name='experiment', wandb=None):
         """Calculate stats and log to W&B, CSV, logger """
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
@@ -561,15 +734,16 @@ class PPO_PolicyGradient_V2:
         self.stats_data['timestep'].append(training_steps)
 
         # Monitoring via W&B
-        wandb.log({
-            'train/timesteps': training_steps,
-            'train/mean policy loss': mean_p_loss,
-            'train/mean value loss': mean_v_loss,
-            'train/mean episode returns': mean_ep_ret,
-            'train/std episode returns': std_ep_rew,
-            'train/mean episode runtime': mean_ep_time,
-            'train/mean episode length': mean_ep_len
-        })
+        if wandb:
+            wandb.log({
+                'train/timesteps': training_steps,
+                'train/mean policy loss': mean_p_loss,
+                'train/mean value loss': mean_v_loss,
+                'train/mean episode returns': mean_ep_ret,
+                'train/std episode returns': std_ep_rew,
+                'train/mean episode runtime': mean_ep_time,
+                'train/mean episode length': mean_ep_len
+            })
 
         logging.info('\n')
         logging.info(f'------------ Episode: {training_steps} --------------')
@@ -578,3 +752,413 @@ class PPO_PolicyGradient_V2:
         logging.info(f"Mean value loss:      {mean_v_loss}")
         logging.info('--------------------------------------------')
         logging.info('\n')
+
+####################
+####################
+
+def arg_parser():
+    parser = argparse.ArgumentParser()
+    # fmt: off
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, capture video of run")
+    parser.add_argument("--train", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, run model in training mode")
+    parser.add_argument("--test", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, run model in testing mode")
+    parser.add_argument("--hyperparam", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, log hyperparameters")
+    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"), help="the name of this experiment")
+    parser.add_argument("--project-name", type=str, default='OpenAIGym-PPO', help="the name of this project") 
+    parser.add_argument("--gym-id", type=str, default="Pendulum-v1", help="the id of the gym environment")
+    parser.add_argument("--learning-rate", type=float, default=3e-4, help="the learning rate of the optimizer")
+    parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
+    parser.add_argument("--total-timesteps", type=int, default=2000000, help="total timesteps of the experiments")
+    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
+    parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
+    
+    # Parse arguments if they are given
+    args = parser.parse_args()
+    return args
+
+def make_env(env_id='Pendulum-v1', gym_wrappers=False, gui=DEFAULT_GUI, record_video=DEFAULT_RECORD_VIDEO, seed=42):
+    # TODO: Needs to be parallized for parallel simulation
+    env = gym.make(env_id)                
+    # gym wrapper
+    if gym_wrappers:
+        env = gym.wrappers.ClipAction(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    
+    # seed env for reproducability
+    env.seed(seed)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+    return env
+
+def make_vec_env(num_env=1):
+    """ Create a vectorized environment for parallelized training."""
+    pass
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    """ Initialize the hidden layers with orthogonal initialization
+        Engstrom, Ilyas, et al., (2020)
+    """
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+def create_path(path: str) -> None:
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+def load_model(path, model, device='cpu'):
+    checkpoint = torch.load(path)
+    model.load_state_dict(checkpoint['model_state_dict'], map_location=device)
+    return model
+
+def simulate_rollout(policy_net, env, render=True):
+    # Rollout until user kills process
+	while True:
+		obs = env.reset()
+		done = False
+
+		# number of timesteps so far
+		t = 0
+
+		# Logging data
+		ep_len = 0            # episodic length
+		ep_ret = 0            # episodic return
+
+		while not done:
+			t += 1
+
+			# Render environment if specified, off by default
+			if render:
+				env.render()
+
+			# Query deterministic action from policy and run it
+			action = policy_net(obs).detach().numpy()
+			obs, rew, done, _ = env.step(action)
+
+			# Sum all episodic rewards as we go along
+			ep_ret += rew
+			
+		# Track episodic length
+		ep_len = t
+
+		# returns episodic length and return in this iteration
+		yield ep_len, ep_ret
+
+def _log_summary(ep_len, ep_ret, ep_num):
+
+        # Monitoring via W&B
+        wandb.log({
+            'test/timesteps': ep_num,
+            'test/episode length': ep_len,
+            'test/episode returns': ep_ret
+        })
+
+		# Print logging statements
+        logging.info('\n')
+        logging.info(f'------------ Episode: {ep_num} --------------')
+        logging.info(f"Episodic Length: {ep_len}")
+        logging.info(f"Episodic Return: {ep_ret}")
+        logging.info(f"--------------------------------------------")
+        logging.info('\n')
+
+def train(env, in_dim, out_dim, total_training_steps, max_batch_size, n_rollout_steps,
+          noptepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
+          adam_epsilon, render_steps, render, save_steps, csv_writer, stats_plotter,
+          normalize_adv=False, normalize_ret=False, log_video=False, ppo_version='v2', 
+          device='cpu', exp_path='./log/', exp_name='PPO-experiment', wandb=None):
+    """Train the policy network (actor) and the value network (critic) with PPO"""
+    agent = None
+    if ppo_version == 'v2':
+        agent = PPO_PolicyGradient_V2(
+                    env, 
+                    in_dim=in_dim, 
+                    out_dim=out_dim,
+                    total_training_steps=total_training_steps,
+                    max_batch_size=max_batch_size,
+                    n_rollout_steps=n_rollout_steps,
+                    noptepochs=noptepochs,
+                    lr_p=learning_rate_p,
+                    lr_v=learning_rate_v,
+                    gae_lambda = gae_lambda,
+                    gamma=gamma,
+                    epsilon=epsilon,
+                    adam_eps=adam_epsilon,
+                    normalize_adv=normalize_adv,
+                    normalize_ret=normalize_ret,
+                    render_steps=render_steps,
+                    render=render,
+                    save_model=save_steps,
+                    csv_writer=csv_writer,
+                    stats_plotter=stats_plotter,
+                    log_video=log_video,
+                    device=device,
+                    exp_path=exp_path,
+                    exp_name=exp_name,
+                    wandb=wandb)
+    else:
+        agent = PPO_PolicyGradient_V1(
+                    env, 
+                    in_dim=in_dim, 
+                    out_dim=out_dim,
+                    total_training_steps=total_training_steps,
+                    max_batch_size=max_batch_size,
+                    n_rollout_steps=n_rollout_steps,
+                    noptepochs=noptepochs,
+                    lr_p=learning_rate_p,
+                    lr_v=learning_rate_v,
+                    gae_lambda = gae_lambda,
+                    gamma=gamma,
+                    epsilon=epsilon,
+                    adam_eps=adam_epsilon,
+                    render=render_steps,
+                    save_model=save_steps,
+                    csv_writer=csv_writer,
+                    stats_plotter=stats_plotter,
+                    log_video=log_video,
+                    device=device)
+    # run training for a total amount of steps
+    agent.learn()
+
+def test(path, env, in_dim, out_dim, steps=10_000, render=True, log_video=False, device='cpu'):
+    """Test the policy network (actor)"""
+    # load model and test it
+    policy_net = PolicyNet(in_dim, out_dim)
+    policy_net = load_model(path, policy_net, device)
+    
+    for ep_num, (ep_len, ep_ret) in enumerate(simulate_rollout(policy_net, env, render)):
+        _log_summary(ep_len=ep_len, ep_ret=ep_ret, ep_num=ep_num)
+
+        if log_video:
+            wandb.log({"test/video": wandb.Video(VIDEO_PATH, caption='episode: '+str(ep_num), fps=4, format="gif"), "step": ep_num})
+
+def hyperparam_tuning(config=None):
+    # set config
+    with wandb.init(config=config):
+        agent = PPO_PolicyGradient_V2(
+                env,
+                in_dim=config.obs_dim, 
+                out_dim=config.act_dim,
+                total_training_steps=config.total_training_steps,
+                max_batch_size=config.max_batch_size,
+                n_rollout_steps=config.n_rollout_steps,
+                noptepochs=config.noptepochs,
+                gae_lambda = config.gae_lambda,
+                gamma=config.gamma,
+                epsilon=config.epsilon,
+                adam_eps=config.adam_epsilon,
+                lr_p=config.learning_rate_p,
+                lr_v=config.learning_rate_v)
+    
+        # run training for a total amount of steps
+        agent.learn()
+
+
+if __name__ == '__main__':
+    
+    """ Classic control gym environments 
+        Find docu: https://www.gymlibrary.dev/environments/classic_control/
+    """
+    # parse arguments
+    args = arg_parser()
+
+    # check if path exists otherwise create
+    if args.video:
+        create_path(VIDEO_PATH)
+    create_path(LOG_PATH)
+    create_path(RESULTS_PATH)
+    
+    # Hyperparameter
+    total_training_steps = 3_000_000     # time steps regarding batches collected and train agent
+    max_batch_size = 512                 # max number of episode samples to be sampled per time step. 
+    n_rollout_steps = 2048               # number of batches per episode, or experiences to collect per environment
+    noptepochs = 32                      # Number of epochs per time step to optimize the neural networks
+    learning_rate_p = 1e-4               # learning rate for policy network
+    learning_rate_v = 1e-3               # learning rate for value network
+    gae_lambda = 0.95                    # factor for trade-off of bias vs variance for GAE
+    gamma = 0.99                         # discount factor
+    adam_epsilon = 1e-8                  # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
+    epsilon = 0.2                        # clipping factor
+    clip_range_vf = 0.2                  # clipping factor for the value loss function. Depends on reward scaling.
+    env_name = 'takeoff-aviary-v0'       # name of OpenAI gym environment other: 'takeoff-aviary-v0'
+    env_number = 1                       # number of actors
+    seed = 42                            # seed gym, env, torch, numpy 
+    normalize_adv = False                # wether to normalize the advantage estimate
+    normalize_ret = True                 # wether to normalize the return function
+    
+    # setup for torch save models and rendering
+    render = False
+    render_steps = 10
+    save_steps = 100
+
+    # Configure logger
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    
+    # seed gym, torch and numpy
+    env = make_env(env_name, seed=seed)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = args.torch_deterministic
+
+    # get correct device
+    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+
+    # get dimensions of obs (what goes in?)
+    # and actions (what goes out?)
+    obs_shape = env.observation_space.shape
+    act_shape = env.action_space.shape
+    
+    upper_bound = env.action_space.high[0]
+    lower_bound = env.action_space.low[0]
+
+    logging.info(f'env observation space: {obs_shape}')
+    logging.info(f'env action space: {act_shape}')
+    logging.info(f'env action upper bound: {upper_bound}')
+    logging.info(f'env action lower bound: {lower_bound}')
+    
+    obs_dim = obs_shape[0] 
+    act_dim = act_shape[0] # 2 at CartPole
+
+    logging.info(f'env observation dim: {obs_dim}')
+    logging.info(f'env action dim: {act_dim}')
+    
+    # upper and lower bound describing the values our obs can take
+    logging.info(f'upper bound for env observation: {env.observation_space.high}')
+    logging.info(f'lower bound for env observation: {env.observation_space.low}')
+
+    # create folder for project
+    exp_name = f"exp_name: {env_name}_{CURR_DATE} {args.exp_name}"
+    exp_folder_name = f'{LOG_PATH}exp_{env_name}_{CURR_TIME}'
+    create_path(exp_folder_name)
+    # create model folder
+    model_path = os.path.join(exp_folder_name, 'models')
+    create_path(model_path)
+
+    # create CSV writer
+    csv_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.csv')
+    png_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.png')
+    csv_writer = CSVWriter(csv_file)
+    stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+
+    # Monitoring with W&B
+    wandb.init(
+            project=args.project_name,
+            entity='drone-mechanics',
+            sync_tensorboard=True,
+            config={ # stores hyperparams in job
+                'env name': env_name,
+                'env number': env_number,
+                'total number of steps': total_training_steps,
+                'max sampled trajectories': max_batch_size,
+                'batches per episode': n_rollout_steps,
+                'number of epochs for update': noptepochs,
+                'input layer size': obs_dim,
+                'output layer size': act_dim,
+                'observation space': obs_shape,
+                'action space': act_shape,
+                'action space upper bound': upper_bound,
+                'action space lower bound': lower_bound,
+                'learning rate (policy net)': learning_rate_p,
+                'learning rate (value net)': learning_rate_v,
+                'epsilon (adam optimizer)': adam_epsilon,
+                'gamma (discount)': gamma,
+                'epsilon (clipping)': epsilon,
+                'gae lambda (GAE)': gae_lambda,
+                'normalize advantage': normalize_adv,
+                'normalize return': normalize_ret,
+                'seed': seed,
+                'experiment path': exp_folder_name,
+                'experiment name': args.exp_name
+            },
+            dir=os.getcwd(),
+            name=exp_name, # needs flag --exp-name
+            monitor_gym=True,
+            save_code=True
+        )
+
+    if args.train:
+        logging.info('Training model...')
+        train(env,
+            in_dim=obs_dim, 
+            out_dim=act_dim,
+            total_training_steps=total_training_steps,
+            max_batch_size=max_batch_size,
+            n_rollout_steps=n_rollout_steps,
+            noptepochs=noptepochs,
+            learning_rate_p=learning_rate_p, 
+            learning_rate_v=learning_rate_v,
+            gae_lambda = gae_lambda,
+            gamma=gamma,
+            epsilon=epsilon,
+            adam_epsilon=adam_epsilon,
+            normalize_adv=normalize_adv,
+            normalize_ret=normalize_ret,
+            render_steps=render_steps,
+            render=render,
+            save_steps=save_steps,
+            csv_writer=csv_writer,
+            stats_plotter=stats_plotter,
+            log_video=args.video,
+            device=device,
+            exp_path=exp_folder_name,
+            exp_name=exp_name,
+            wandb=wandb)
+    
+    elif args.test:
+        logging.info('Evaluation model...')
+        PATH = './models/Pendulum-v1_2023-01-01_policyNet.pth' # TODO: define path
+        test(PATH, env, in_dim=obs_dim, out_dim=act_dim, device=device)
+    
+    elif args.hyperparam:
+        # hyperparameter tuning with sweeps
+
+        logging.info('Hyperparameter tuning...')
+        # sweep config
+        sweep_config = {
+            'method': 'bayes'
+            }
+        metric = {
+            'name': 'mean_ep_rews',
+            'goal': 'maximize'   
+            }
+        parameters_dict = {
+            'learning_rate_p': {
+                'values': [1e-5, 1e-4, 1e-3, 1e-2]
+            },
+            'learning_rate_v': {
+                'values': [1e-5, 1e-4, 1e-3, 1e-2]
+            },
+            'gamma': {
+                'values': [0.95, 0.96, 0.97, 0.98, 0.99]
+            },
+            'adam_epsilon': {
+                'values': [1e-9, 1e-8, 1e-7, 1e-6, 1e-5]
+            },
+            'epsilon': {
+                'values': [0.1, 0.2, 0.25, 0.3, 0.4]
+            },
+            }
+
+        # set defined parameters
+        sweep_config['parameters'] = parameters_dict
+        sweep_config['metric'] = metric
+
+        # run sweep with sweep controller
+        sweep_id = wandb.sweep(sweep_config, project="ppo-OpenAIGym-hyperparam-tuning")
+        wandb.agent(sweep_id, hyperparam_tuning, count=5)
+
+    else:
+        assert("Needs training (--train), testing (--test) or hyperparameter tuning (--hyperparam) flag set!")
+
+    #################
+    #### Cleanup ####
+    #################
+
+    logging.info('### Done ###')
+
+    # cleanup 
+    env.close()
+    wandb.run.finish() if wandb and wandb.run else None
