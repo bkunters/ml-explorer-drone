@@ -1,0 +1,6 @@
+,experiment,timestep,mean episodic runtime,mean episodic length,eval episodes,mean episodic returns,min episodic returns,max episodic returns,std episodic returns,episodes
+0,"exp_name: Pendulum-v1_2023-01-15 (seperate network, actor-critic advantage, normalize adv)",2200,0.193549,200.0,11,-1224.634815,-1633.46679,-739.713681,293.073728,0
+0,"exp_name: Pendulum-v1_2023-01-15 (seperate network, actor-critic advantage, normalize adv)",4400,0.066948,200.0,11,-1451.628374,-1710.264003,-1181.491691,170.058064,1
+0,"exp_name: Pendulum-v1_2023-01-15 (seperate network, actor-critic advantage, normalize adv)",6600,0.056668,200.0,11,-1395.169991,-1730.470713,-851.950793,308.364798,2
+0,"exp_name: Pendulum-v1_2023-01-15 (seperate network, actor-critic advantage, normalize adv)",8800,0.053024,200.0,11,-1107.408004,-1413.016281,-648.18515,236.26387,3
+0,"exp_name: Pendulum-v1_2023-01-15 (seperate network, actor-critic advantage, normalize adv)",11000,0.059573,200.0,11,-1148.582801,-1868.268451,-820.769505,287.141584,4

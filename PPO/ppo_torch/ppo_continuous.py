@@ -397,7 +397,9 @@ class PPO_PolicyGradient_V2:
         return advantages, cum_returns
 
     def advantage_actor_critic(self, episode_rewards, values, normalized_adv=False, normalized_ret=False):
-        """Advantage Actor-Critic by calculating delta = G(t) - V(s_t)
+        """ Advantage Actor-Critic
+            Discounted return: G(t) = R(t) + gamma * R(t-1)
+            Advantage: delta = G(t) - V(s_t)
         """
         # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
         # Step 4: Calculate returns
@@ -557,7 +559,7 @@ class PPO_PolicyGradient_V2:
         episode_lens = []
 
         # Run Monte Carlo simulation for n timesteps per batch
-        logging.info("Collecting batch trajectories...")
+        logging.info(f"Collecting trajectories in batch...")
         while t_step < n_steps:
             
             # rewards collected
@@ -570,9 +572,9 @@ class PPO_PolicyGradient_V2:
 
             # Run episode for a fixed amount of timesteps
             # to keep rollout size fixed and episodes independent
-            for t_episode in range(0, self.batch_size):
+            for t_batch in range(0, self.batch_size):
                 # render gym envs
-                if render and t_episode % self.render_steps == 0:
+                if render and t_batch % self.render_steps == 0:
                     self.env.render()
                 
                 t_step += 1 
@@ -606,7 +608,7 @@ class PPO_PolicyGradient_V2:
             time_elapsed = end_epoch - start_epoch
             episode_time.append(time_elapsed)
 
-            episode_lens.append(t_episode + 1) # as we started at 0
+            episode_lens.append(t_batch + 1) # as we started at 0
             episode_rewards.append(rewards)
 
         # convert trajectories to torch tensors
@@ -656,10 +658,9 @@ class PPO_PolicyGradient_V2:
 
             # Advantage functions
             # advantages, cum_returns = self.advantage_reinforce(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            
-            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
             # update network params 
             for _ in range(self.n_optepochs):
@@ -673,6 +674,7 @@ class PPO_PolicyGradient_V2:
             # log all statistical values to CSV
             self.log_stats(policy_losses, value_losses, rewards, ep_lens, training_steps, ep_time, done_so_far, exp_name=self.exp_name)
             
+            # increment for each iteration
             done_so_far += 1
 
             # store model with checkpoints
@@ -994,9 +996,9 @@ if __name__ == '__main__':
     
     # Hyperparameter
     total_training_steps = 3_000_000     # time steps regarding batches collected and train agent
-    batch_size = 512                 # max number of episode samples to be sampled per time step. 
+    batch_size = 512                     # max number of episode samples to be sampled per time step. 
     n_rollout_steps = 2048               # number of batches per episode, or experiences to collect per environment
-    n_optepochs = 32                      # Number of epochs per time step to optimize the neural networks
+    n_optepochs = 31                     # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4               # learning rate for policy network
     learning_rate_v = 1e-3               # learning rate for value network
     gae_lambda = 0.95                    # factor for trade-off of bias vs variance for GAE
@@ -1008,7 +1010,7 @@ if __name__ == '__main__':
     env_number = 1                       # number of actors
     seed = 42                            # seed gym, env, torch, numpy 
     normalize_adv = True                 # wether to normalize the advantage estimate
-    normalize_ret = True                 # wether to normalize the return function
+    normalize_ret = False                # wether to normalize the return function
     
     # setup for torch save models and rendering
     render = False
