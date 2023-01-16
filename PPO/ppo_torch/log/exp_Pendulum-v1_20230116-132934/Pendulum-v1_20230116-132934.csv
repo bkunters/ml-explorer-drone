@@ -1,0 +1,16 @@
+,experiment,timestep,mean episodic runtime,mean episodic length,eval episodes,mean episodic returns,min episodic returns,max episodic returns,std episodic returns,episodes
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",2200,0.037361,200.0,11,-1224.634815,-1633.46679,-739.713681,293.073728,0
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",4400,0.037221,200.0,11,-1451.482841,-1710.192143,-1181.42488,170.080694,1
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",6600,0.039645,200.0,11,-1398.01753,-1731.103401,-875.05736,304.766237,2
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",8800,0.037814,200.0,11,-1122.552774,-1407.171528,-757.883316,203.954328,3
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",11000,0.037343,200.0,11,-1180.351205,-1869.936142,-807.007588,280.417268,4
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",13200,0.036793,200.0,11,-1089.647618,-1755.59638,-701.783887,292.273854,5
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",15400,0.035309,200.0,11,-1371.617766,-1779.088947,-744.770504,356.219839,6
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",17600,0.038834,200.0,11,-1259.062211,-1668.360869,-855.726789,275.700306,7
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",19800,0.036404,200.0,11,-1115.365423,-1748.998825,-861.258418,270.738106,8
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",22000,0.036187,200.0,11,-1191.616758,-1561.370761,-651.989205,271.139354,9
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",24200,0.035801,200.0,11,-1187.15604,-1759.878219,-915.836168,292.557909,10
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",26400,0.036608,200.0,11,-1219.36254,-1843.462456,-858.593579,308.51816,11
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",28600,0.036684,200.0,11,-1331.094215,-1798.120279,-856.277182,325.770774,12
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",30800,0.037593,200.0,11,-1093.75753,-1790.939855,-742.177842,258.645709,13
+0,"exp_name: Pendulum-v1_2023-01-16 (reinforce advantage, normalize adv)",33000,0.036144,200.0,11,-1199.121751,-1561.622011,-898.494764,240.452369,14

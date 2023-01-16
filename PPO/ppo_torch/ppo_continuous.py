@@ -10,6 +10,7 @@ from datetime import datetime
 import os
 import argparse
 
+from stable_baselines3 import PPO
 # gym environment
 import gym
 
@@ -133,7 +134,8 @@ class PPO_PolicyGradient_V1:
         adam_eps=1e-5,
         momentum=0.9,
         adam=True,
-        render=10,
+        render_steps=10,
+        render_video=False,
         save_model=10,
         csv_writer=None,
         stats_plotter=None,
@@ -158,7 +160,8 @@ class PPO_PolicyGradient_V1:
 
         # environment
         self.env = env
-        self.render_steps = render
+        self.render_steps = render_steps
+        self.render_video = render_video
         self.save_model = save_model
         self.device = device
 
@@ -242,7 +245,7 @@ class PPO_PolicyGradient_V2:
         momentum=0.9,
         adam=True,
         render_steps=10,
-        render=False,
+        render_video=False,
         save_model=10,
         csv_writer=None,
         stats_plotter=None,
@@ -272,7 +275,7 @@ class PPO_PolicyGradient_V2:
         # environment
         self.env = env
         self.render_steps = render_steps
-        self.render = render
+        self.render_video = render_video
         self.save_model = save_model
         self.device = device
         self.normalize_advantage = normalize_adv
@@ -330,6 +333,15 @@ class PPO_PolicyGradient_V2:
         entropy = dist.entropy()
         return action, log_prob, entropy
     
+    def get_random_action(self, dist):
+        """Make random action selection."""
+        action = self.env.action_space.sample()
+        if isinstance(action, np.ndarray):
+            action = torch.tensor(action, dtype=torch.float)
+        log_prob = dist.log_prob(action)
+        entropy = dist.entropy()
+        return action, log_prob, entropy
+
     def get_values(self, obs, actions):
         """Make value selection function (outputs values for obs in a batch)."""
         values = self.value_net(obs).squeeze()
@@ -345,6 +357,11 @@ class PPO_PolicyGradient_V2:
         """ Given an observation, get action and probabilities from policy network (actor)"""
         action_dist = self.get_continuous_policy(obs) 
         action, log_prob, entropy = self.get_action(action_dist)
+        return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
+
+    def random_step(self, obs):
+        action_dist = self.get_continuous_policy(obs) 
+        action, log_prob, entropy = self.get_random_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
 
     def advantage_estimate(self, episode_rewards, values, normalized_adv=False, normalized_ret=False):
@@ -369,8 +386,11 @@ class PPO_PolicyGradient_V2:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def advantage_reinforce(self, episode_rewards, values, normalized_adv=False, normalized_ret=False):
-        """ Advantage Reinforce A(s_t, a_t) = G(t)
+    def advantage_reinforce(self, episode_rewards, normalized_adv=False, normalized_ret=False):
+        """ Advantage Reinforce 
+            A(s_t, a_t) = G(t)
+            - G(t) = total disounted reward
+            - Discounted return: G(t) = R(t) + gamma * R(t-1)
         """
         # Returns: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
         # Example Reinforce: https://github.com/pytorch/examples/blob/main/reinforcement_learning/reinforce.py
@@ -386,6 +406,7 @@ class PPO_PolicyGradient_V2:
                 discounted_reward = reward + (self.gamma * discounted_reward)
                 cum_returns.insert(0, discounted_reward) # reverse it again
         cum_returns = torch.tensor(np.array(cum_returns), device=self.device, dtype=torch.float)
+        # normalize for more stability
         if normalized_ret:
             cum_returns = self.normalize_ret(cum_returns)
         # Step 5: Calculate advantage
@@ -425,12 +446,12 @@ class PPO_PolicyGradient_V2:
         return advantages, cum_returns
 
     def advantage_TD_actor_critic(self, episode_rewards, values, normalized_adv=False, normalized_ret=False):
-        """ Advantage TD Actor-Critic A(s,a) = r + (gamma * V(s_t+1)) - V(s_t)
-            TD Error can be used as an estimator for Advantage function
+        """ Advantage TD Actor-Critic 
+            TD Error = δ_t = r_t + γ * V(s_t+1) − V(s_t)
+            TD Error is used as an estimator for the advantage function
+            A(s,a) = r_t + (gamma * V(s_t+1)) - V(s_t)
         """
         # Step 4: Calculate returns
-        # G(t) is the total disounted reward
-        # return value: G(t) = R(t) + gamma * R(t-1)
         advantages = []
         cum_returns = []
         for rewards in reversed(episode_rewards):  # reversed order
@@ -541,7 +562,7 @@ class PPO_PolicyGradient_V2:
     def finish_episode(self):
         pass 
 
-    def collect_rollout(self, n_steps=1, render=False):
+    def collect_rollout(self, n_steps=1):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
         
         t_step, rewards = 0, []
@@ -574,7 +595,7 @@ class PPO_PolicyGradient_V2:
             # to keep rollout size fixed and episodes independent
             for t_batch in range(0, self.batch_size):
                 # render gym envs
-                if render and t_batch % self.render_steps == 0:
+                if self.render_video and t_batch % self.render_steps == 0:
                     self.env.render()
                 
                 t_step += 1 
@@ -582,11 +603,14 @@ class PPO_PolicyGradient_V2:
                 # action logic 
                 # sampled via policy which defines behavioral strategy of an agent
                 action, log_probability, _ = self.step(obs)
+
+                # Perform action logic at random 
+                # action, log_probability, _ = self.random_step(obs)
                         
                 # STEP 3: collecting set of trajectories D_k by running action 
                 # that was sampled from policy in environment
                 __obs, reward, done, truncated = self.env.step(action)
-
+                
                 # collection of trajectories in batches
                 episode_obs.append(obs)
                 episode_nextobs.append(__obs)
@@ -648,17 +672,16 @@ class PPO_PolicyGradient_V2:
             # Collect data over one episode
             # Episode = recording of actions and states that an agent performed from a start state to an end state
             # STEP 3: simulate and collect trajectories --> the following values are all per batch over one episode
-            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time = self.collect_rollout(n_steps=self.n_rollout_steps, render=self.render)
+            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time = self.collect_rollout(n_steps=self.n_rollout_steps)
 
             # experiences simulated so far
             training_steps += np.sum(ep_lens)
 
             # STEP 4-5: Calculate cummulated reward and advantage at timestep t_step
             values, _ , _ = self.get_values(obs, actions)
-
-            # Advantage functions
-            # advantages, cum_returns = self.advantage_reinforce(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # Calculate advantage function
+            advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
@@ -762,10 +785,12 @@ class PPO_PolicyGradient_V2:
             'train/mean policy loss': mean_p_loss,
             'train/mean value loss': mean_v_loss,
             'train/mean episode returns': mean_ep_ret,
+            'train/min episode returns': min_ep_ret,
+            'train/max episode returns': max_ep_ret,
             'train/std episode returns': std_ep_rew,
             'train/mean episode runtime': mean_ep_time,
             'train/mean episode length': mean_ep_len,
-            'train/episodes': done_so_far
+            'train/episodes': done_so_far,
         })
 
         logging.info('\n')
@@ -839,7 +864,7 @@ def load_model(path, model, device='cpu'):
     model.load_state_dict(checkpoint['model_state_dict'], map_location=device)
     return model
 
-def simulate_rollout(policy_net, env, render=True):
+def simulate_rollout(policy_net, env, render_video=True):
     # Rollout until user kills process
 	while True:
 		obs = env.reset()
@@ -856,7 +881,7 @@ def simulate_rollout(policy_net, env, render=True):
 			t += 1
 
 			# Render environment if specified, off by default
-			if render:
+			if render_video:
 				env.render()
 
 			# Query deterministic action from policy and run it
@@ -889,12 +914,12 @@ def _log_summary(ep_len, ep_ret, ep_num):
         logging.info(f"--------------------------------------------")
         logging.info('\n')
 
-def train(env, in_dim, out_dim, total_training_steps, batch_size, n_rollout_steps,
-          n_optepochs, learning_rate_p, learning_rate_v, gae_lambda, gamma, epsilon,
-          adam_epsilon, render_steps, render, save_steps, csv_writer, stats_plotter,
+def train(env, in_dim, out_dim, total_training_steps, batch_size=512, n_rollout_steps=2048,
+          n_optepochs=32, learning_rate_p=1e-4, learning_rate_v=1e-3, gae_lambda=0.95, gamma=0.99, epsilon=0.2,
+          adam_epsilon=1e-8, render_steps=10, render_video=False, save_steps=10, csv_writer=None, stats_plotter=None,
           normalize_adv=False, normalize_ret=False, log_video=False, ppo_version='v2', 
           device='cpu', exp_path='./log/', exp_name='PPO-experiment'):
-    """Train the policy network (actor) and the value network (critic) with PPO"""
+    """Train the policy network (actor) and the value network (critic) with PPO (clip version)"""
     agent = None
     if ppo_version == 'v2':
         agent = PPO_PolicyGradient_V2(
@@ -914,7 +939,7 @@ def train(env, in_dim, out_dim, total_training_steps, batch_size, n_rollout_step
                     normalize_adv=normalize_adv,
                     normalize_ret=normalize_ret,
                     render_steps=render_steps,
-                    render=render,
+                    render_video=render_video,
                     save_model=save_steps,
                     csv_writer=csv_writer,
                     stats_plotter=stats_plotter,
@@ -937,7 +962,8 @@ def train(env, in_dim, out_dim, total_training_steps, batch_size, n_rollout_step
                     gamma=gamma,
                     epsilon=epsilon,
                     adam_eps=adam_epsilon,
-                    render=render_steps,
+                    render_steps=render_steps,
+                    render_video=render_video,
                     save_model=save_steps,
                     csv_writer=csv_writer,
                     stats_plotter=stats_plotter,
@@ -946,13 +972,13 @@ def train(env, in_dim, out_dim, total_training_steps, batch_size, n_rollout_step
     # run training for a total amount of steps
     agent.learn()
 
-def test(path, env, in_dim, out_dim, steps=10_000, render=True, log_video=False, device='cpu'):
+def test(path, env, in_dim, out_dim, steps=10_000, render_video=True, log_video=False, device='cpu'):
     """Test the policy network (actor)"""
     # load model and test it
     policy_net = PolicyNet(in_dim, out_dim)
     policy_net = load_model(path, policy_net, device)
     
-    for ep_num, (ep_len, ep_ret) in enumerate(simulate_rollout(policy_net, env, render)):
+    for ep_num, (ep_len, ep_ret) in enumerate(simulate_rollout(policy_net, env, render_video)):
         _log_summary(ep_len=ep_len, ep_ret=ep_ret, ep_num=ep_num)
 
         if log_video:
@@ -998,7 +1024,7 @@ if __name__ == '__main__':
     total_training_steps = 3_000_000     # time steps regarding batches collected and train agent
     batch_size = 512                     # max number of episode samples to be sampled per time step. 
     n_rollout_steps = 2048               # number of batches per episode, or experiences to collect per environment
-    n_optepochs = 31                     # Number of epochs per time step to optimize the neural networks
+    n_optepochs = 32                     # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4               # learning rate for policy network
     learning_rate_v = 1e-3               # learning rate for value network
     gae_lambda = 0.95                    # factor for trade-off of bias vs variance for GAE
@@ -1009,11 +1035,11 @@ if __name__ == '__main__':
     env_name = 'Pendulum-v1'             # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0', 'takeoff-aviary-v0'
     env_number = 1                       # number of actors
     seed = 42                            # seed gym, env, torch, numpy 
-    normalize_adv = True                 # wether to normalize the advantage estimate
-    normalize_ret = False                # wether to normalize the return function
+    normalize_adv = True                # wether to normalize the advantage estimate
+    normalize_ret = False                 # wether to normalize the return function
     
     # setup for torch save models and rendering
-    render = False
+    render_video = False
     render_steps = 10
     save_steps = 100
 
@@ -1120,7 +1146,7 @@ if __name__ == '__main__':
             normalize_adv=normalize_adv,
             normalize_ret=normalize_ret,
             render_steps=render_steps,
-            render=args.video,
+            render_video=render_video,
             save_steps=save_steps,
             csv_writer=csv_writer,
             stats_plotter=stats_plotter,
