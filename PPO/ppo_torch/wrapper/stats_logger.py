@@ -1,4 +1,5 @@
 import glob
+import random
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -56,6 +57,10 @@ class StatsPlotter:
         df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
         return df
 
+    def random_colour_generator(self, number_of_colors=16):
+        colour = ["#"+''.join([random.choice('0123456789ABCDEF') for j in range(6)]) for i in range(number_of_colors)]
+        return colour
+
     def plot_box(self, dataframe, x, y, title='title', x_label='Timestep', y_label='Mean Episodic Time', wandb=None):
         """Create a box plot for time needed to converge per experiment."""     
         # get exp names
@@ -68,12 +73,16 @@ class StatsPlotter:
         plt.legend(labels=df_exp_unique, loc='center right')
         # plot the file to given destination
         ax.figure.savefig(self.file_name_and_path)
-        plt.show()
+        # show and close automatically
+        plt.show(block=False)
+        plt.pause(3)
+        plt.close()
 
         if wandb:
             wandb.log({'Mean Episodic Time': plt})
 
-    def plot_seaborn_fill(self, dataframe, x, y, y_min, y_max, title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=0, lower_bound=-1800, xlim_up=3_000_000, ylim_low=-2000, ylim_up=200, color='blue', smoothing=2, wandb=None):
+    def plot_seaborn_fill(self, dataframe, x, y, y_min, y_max, title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=0, lower_bound=-1800, xlim_up=3_000_000, ylim_low=-2000, ylim_up=200, color=None, smoothing=2, wandb=None):
+            
         # get values from df
         # add smoothing
         df_min = gaussian_filter1d(dataframe[y_min].to_numpy(), sigma=smoothing)
@@ -84,10 +93,16 @@ class StatsPlotter:
         df_exp = dataframe['experiment'].values.astype('str')
         df_exp_unique = list(dict.fromkeys(df_exp))
 
+        # random colour generator
+        if not color:
+            color = self.random_colour_generator()
+        else:
+            color = sns.xkcd_rgb[color]
+
         # draw mean line
         ax = sns.lineplot(x=df_x, y=df_y, lw=2)
         # fill std
-        ax.fill_between(x=df_x, y1=df_min, y2=df_max, color=sns.xkcd_rgb[color], alpha=0.2)
+        ax.fill_between(x=df_x, y1=df_min, y2=df_max, color=color, alpha=0.2)
         # draw upper and lower bounds
         ax.axhline(lower_bound, linewidth=1, color='red', label='lower bound')
         ax.axhline(upper_bound, linewidth=1, color='red', label='upper bound')        
@@ -98,7 +113,10 @@ class StatsPlotter:
 
         # plot the file to given destination
         ax.figure.savefig(self.file_name_and_path)
-        plt.show()
+        # show and close automatically
+        plt.show(block=False)
+        plt.pause(3)
+        plt.close()
         
         if wandb:
             images = wandb.Image(plt)

@@ -680,8 +680,8 @@ class PPO_PolicyGradient_V2:
             # STEP 4-5: Calculate cummulated reward and advantage at timestep t_step
             values, _ , _ = self.get_values(obs, actions)
             # Calculate advantage function
-            advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
@@ -1021,7 +1021,7 @@ if __name__ == '__main__':
     create_path(RESULTS_PATH)
     
     # Hyperparameter
-    total_training_steps = 3_000_000     # time steps regarding batches collected and train agent
+    total_training_steps = 2_000_000     # time steps regarding batches collected and train agent
     batch_size = 512                     # max number of episode samples to be sampled per time step. 
     n_rollout_steps = 2048               # number of batches per episode, or experiences to collect per environment
     n_optepochs = 32                     # Number of epochs per time step to optimize the neural networks
@@ -1036,7 +1036,7 @@ if __name__ == '__main__':
     env_number = 1                       # number of actors
     seed = 42                            # seed gym, env, torch, numpy 
     normalize_adv = True                # wether to normalize the advantage estimate
-    normalize_ret = False                 # wether to normalize the return function
+    normalize_ret = True                 # wether to normalize the return function
     
     # setup for torch save models and rendering
     render_video = False
@@ -1093,40 +1093,41 @@ if __name__ == '__main__':
     stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
     # Monitoring with W&B
-    wandb.init(
-            project=args.project_name,
-            entity='drone-mechanics',
-            sync_tensorboard=True,
-            config={ # stores hyperparams in job
-                'env name': env_name,
-                'env number': env_number,
-                'total number of steps': total_training_steps,
-                'max sampled trajectories': batch_size,
-                'batches per episode': n_rollout_steps,
-                'number of epochs for update': n_optepochs,
-                'input layer size': obs_dim,
-                'output layer size': act_dim,
-                'observation space': obs_shape,
-                'action space': act_shape,
-                'action space upper bound': upper_bound,
-                'action space lower bound': lower_bound,
-                'learning rate (policy net)': learning_rate_p,
-                'learning rate (value net)': learning_rate_v,
-                'epsilon (adam optimizer)': adam_epsilon,
-                'gamma (discount)': gamma,
-                'epsilon (clipping)': epsilon,
-                'gae lambda (GAE)': gae_lambda,
-                'normalize advantage': normalize_adv,
-                'normalize return': normalize_ret,
-                'seed': seed,
-                'experiment path': exp_folder_name,
-                'experiment name': args.exp_name
-            },
-            dir=os.getcwd(),
-            name=exp_name, # needs flag --exp-name
-            monitor_gym=True,
-            save_code=True
-        )
+    if not args.hyperparam:
+        wandb.init(
+                project=args.project_name,
+                entity='drone-mechanics',
+                sync_tensorboard=True,
+                config={ # stores hyperparams in job
+                    'env name': env_name,
+                    'env number': env_number,
+                    'total_training_steps': total_training_steps,
+                    'max sampled trajectories': batch_size,
+                    'batches per episode': n_rollout_steps,
+                    'number of epochs for update': n_optepochs,
+                    'input layer size': obs_dim,
+                    'output layer size': act_dim,
+                    'observation space': obs_shape,
+                    'action space': act_shape,
+                    'action space upper bound': upper_bound,
+                    'action space lower bound': lower_bound,
+                    'learning rate (policy net)': learning_rate_p,
+                    'learning rate (value net)': learning_rate_v,
+                    'epsilon (adam optimizer)': adam_epsilon,
+                    'gamma (discount)': gamma,
+                    'epsilon (clip_range)': epsilon,
+                    'gae lambda (GAE)': gae_lambda,
+                    'normalize advantage': normalize_adv,
+                    'normalize return': normalize_ret,
+                    'seed': seed,
+                    'experiment path': exp_folder_name,
+                    'experiment name': args.exp_name
+                },
+                dir=os.getcwd(),
+                name=exp_name,
+                monitor_gym=True,
+                save_code=True
+            )
 
     if args.train:
         logging.info('Training model...')
@@ -1139,7 +1140,7 @@ if __name__ == '__main__':
             n_optepochs=n_optepochs,
             learning_rate_p=learning_rate_p, 
             learning_rate_v=learning_rate_v,
-            gae_lambda = gae_lambda,
+            gae_lambda=gae_lambda,
             gamma=gamma,
             epsilon=epsilon,
             adam_epsilon=adam_epsilon,
@@ -1161,42 +1162,448 @@ if __name__ == '__main__':
         test(PATH, env, in_dim=obs_dim, out_dim=act_dim, device=device)
     
     elif args.hyperparam:
-        # hyperparameter tuning with sweeps
+        """automatically run through multiple train runs"""
+        
+        param_dict = {
+                # 'learning rate (policy net)': [1e-5, 1e-4, 1e-3, 1e-2],
+                # 'learning rate (value net)': [1e-5, 1e-4, 1e-3, 1e-2],
+                # 'gamma (discount)': [0.95, 0.96, 0.97, 0.98, 0.99],
+                # 'epsilon (clip_range)': [0.1, 0.2, 0.3],
+                # 'gae lambda (GAE)': [0.9, 0.93, 0.95, 0.96, 0.99, 1.0],
+                # 'epsilon (adam optimizer)': [1e-9, 1e-8, 1e-7, 1e-6, 1e-5],
+                'number of epochs for update': [8, 16, 32, 64, 128],
+                'max sampled trajectories': [32, 64, 128, 256, 512, 1024]
+        }
 
-        logging.info('Hyperparameter tuning...')
-        # sweep config
-        sweep_config = {
-            'method': 'bayes'
-            }
-        metric = {
-            'name': 'mean_ep_rews',
-            'goal': 'maximize'   
-            }
-        parameters_dict = {
-            'learning_rate_p': {
-                'values': [1e-5, 1e-4, 1e-3, 1e-2]
-            },
-            'learning_rate_v': {
-                'values': [1e-5, 1e-4, 1e-3, 1e-2]
-            },
-            'gamma': {
-                'values': [0.95, 0.96, 0.97, 0.98, 0.99]
-            },
-            'adam_epsilon': {
-                'values': [1e-9, 1e-8, 1e-7, 1e-6, 1e-5]
-            },
-            'epsilon': {
-                'values': [0.1, 0.2, 0.25, 0.3, 0.4]
-            },
-            }
+        # iterate over settings
+        for key, val in param_dict.items():
+            logging.info(f'Hyperparam Tuning \n----- Key: {key} -----\n')
+            logging.info(f'Hyperparam Tuning \n----- Values: {val} -----\n')
+            match key:
+                    case 'learning rate (policy net)':
+                        for i in range(0, len(val)):
+                            
+                            # setup env
+                            env = make_env(env_name, seed=seed)
 
-        # set defined parameters
-        sweep_config['parameters'] = parameters_dict
-        sweep_config['metric'] = metric
+                            # Settup project
+                            exp_name = f"exp_name: {env_name}_{CURR_DATE} ({key}: {val[i]})"
+                            exp_folder_name = f'{LOG_PATH}exp_{env_name}_{CURR_TIME}'
+                            create_path(exp_folder_name)
+                            # create model folder
+                            model_path = os.path.join(exp_folder_name, 'models')
+                            create_path(model_path)
 
-        # run sweep with sweep controller
-        sweep_id = wandb.sweep(sweep_config, project="ppo-OpenAIGym-hyperparam-tuning")
-        wandb.agent(sweep_id, hyperparam_tuning, count=5)
+                            # create CSV writer
+                            csv_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.csv')
+                            png_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.png')
+                            csv_writer = CSVWriter(csv_file)
+                            stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+
+                            wandb.init(
+                                        project=args.project_name,
+                                        entity='drone-mechanics',
+                                        sync_tensorboard=True,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                            'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
+                                            'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
+                                            'learning rate (policy net)': val[i],'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
+                                            'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
+                                            'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': args.exp_name
+                                        },
+                                        dir=os.getcwd(),
+                                        name=exp_name,
+                                        monitor_gym=True,
+                                        save_code=True
+                            )
+                            # Run the training
+                            train(env,
+                                in_dim=obs_dim, 
+                                out_dim=act_dim,
+                                total_training_steps=total_training_steps,
+                                learning_rate_p=val[i],
+                                exp_path=exp_folder_name,
+                                exp_name=exp_name,
+                                normalize_adv=normalize_adv,
+                                normalize_ret=normalize_ret)
+
+                            # clean up
+                            logging.info("---- Done ----")
+                            env.close()
+                            wandb.run.finish() if wandb and wandb.run else None
+
+                    case 'learning rate (value net)':
+                        for i in range(0, len(val)):
+                            
+                            # setup env
+                            env = make_env(env_name, seed=seed)
+                            
+                            # Settup project
+                            exp_name = f"exp_name: {env_name}_{CURR_DATE} ({key}: {val[i]})"
+                            exp_folder_name = f'{LOG_PATH}exp_{env_name}_{CURR_TIME}'
+                            create_path(exp_folder_name)
+                            # create model folder
+                            model_path = os.path.join(exp_folder_name, 'models')
+                            create_path(model_path)
+
+                            # create CSV writer
+                            csv_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.csv')
+                            png_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.png')
+                            csv_writer = CSVWriter(csv_file)
+                            stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+
+                            wandb.init(
+                                        project=args.project_name,
+                                        entity='drone-mechanics',
+                                        sync_tensorboard=True,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                            'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
+                                            'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
+                                            'learning rate (policy net)': learning_rate_p,'learning rate (value net)': val[i],'epsilon (adam optimizer)': adam_epsilon,
+                                            'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
+                                            'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': args.exp_name
+                                        },
+                                        dir=os.getcwd(),
+                                        name=exp_name,
+                                        monitor_gym=True,
+                                        save_code=True
+                            )
+                            # Train loop
+                            train(env,
+                                in_dim=obs_dim, 
+                                out_dim=act_dim,
+                                total_training_steps=total_training_steps,
+                                learning_rate_v=val[i],
+                                exp_path=exp_folder_name,
+                                exp_name=exp_name,
+                                normalize_adv=normalize_adv,
+                                normalize_ret=normalize_ret)
+
+                            # clean up
+                            logging.info("---- Done ----")
+                            env.close()
+                            wandb.run.finish() if wandb and wandb.run else None
+
+                    case 'gamma (discount)':
+                        for i in range(0, len(val)):
+                            
+                            # setup env
+                            env = make_env(env_name, seed=seed)
+                            
+                            # Settup project
+                            exp_name = f"exp_name: {env_name}_{CURR_DATE} ({key}: {val[i]})"
+                            exp_folder_name = f'{LOG_PATH}exp_{env_name}_{CURR_TIME}'
+                            create_path(exp_folder_name)
+                            # create model folder
+                            model_path = os.path.join(exp_folder_name, 'models')
+                            create_path(model_path)
+
+                            # create CSV writer
+                            csv_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.csv')
+                            png_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.png')
+                            csv_writer = CSVWriter(csv_file)
+                            stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+
+                            wandb.init(
+                                        project=args.project_name,
+                                        entity='drone-mechanics',
+                                        sync_tensorboard=True,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                            'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
+                                            'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
+                                            'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
+                                            'gamma (discount)': val[i],'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
+                                            'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': args.exp_name
+                                        },
+                                        dir=os.getcwd(),
+                                        name=exp_name,
+                                        monitor_gym=True,
+                                        save_code=True
+                            )
+                            # Train loop
+                            train(env,
+                                in_dim=obs_dim, 
+                                out_dim=act_dim,
+                                total_training_steps=total_training_steps,
+                                gamma=val[i],
+                                exp_path=exp_folder_name,
+                                exp_name=exp_name,
+                                normalize_adv=normalize_adv,
+                                normalize_ret=normalize_ret)
+
+                            # clean up
+                            logging.info("---- Done ----")
+                            env.close()
+                            wandb.run.finish() if wandb and wandb.run else None
+
+                    case 'epsilon (clip_range)':
+                        for i in range(0, len(val)):
+                            
+                            # setup env
+                            env = make_env(env_name, seed=seed)
+                            
+                            # Settup project
+                            exp_name = f"exp_name: {env_name}_{CURR_DATE} ({key}: {val[i]})"
+                            exp_folder_name = f'{LOG_PATH}exp_{env_name}_{CURR_TIME}'
+                            create_path(exp_folder_name)
+                            # create model folder
+                            model_path = os.path.join(exp_folder_name, 'models')
+                            create_path(model_path)
+
+                            # create CSV writer
+                            csv_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.csv')
+                            png_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.png')
+                            csv_writer = CSVWriter(csv_file)
+                            stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+
+                            wandb.init(
+                                        project=args.project_name,
+                                        entity='drone-mechanics',
+                                        sync_tensorboard=True,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                            'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
+                                            'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
+                                            'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
+                                            'gamma (discount)': gamma,'epsilon (clip_range)': val[i],'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
+                                            'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': args.exp_name
+                                        },
+                                        dir=os.getcwd(),
+                                        name=exp_name,
+                                        monitor_gym=True,
+                                        save_code=True
+                            )
+                            # Train loop
+                            train(env,
+                                in_dim=obs_dim, 
+                                out_dim=act_dim,
+                                total_training_steps=total_training_steps,
+                                epsilon=val[i],
+                                exp_path=exp_folder_name,
+                                exp_name=exp_name,
+                                normalize_adv=normalize_adv,
+                                normalize_ret=normalize_ret)
+
+                            # clean up
+                            logging.info("---- Done ----")
+                            env.close()
+                            wandb.run.finish() if wandb and wandb.run else None
+
+                    case 'gae lambda (GAE)':
+                        for i in range(0, len(val)):
+                            
+                            # setup env
+                            env = make_env(env_name, seed=seed)
+                            
+                            # Settup project
+                            exp_name = f"exp_name: {env_name}_{CURR_DATE} ({key}: {val[i]})"
+                            exp_folder_name = f'{LOG_PATH}exp_{env_name}_{CURR_TIME}'
+                            create_path(exp_folder_name)
+                            # create model folder
+                            model_path = os.path.join(exp_folder_name, 'models')
+                            create_path(model_path)
+
+                            # create CSV writer
+                            csv_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.csv')
+                            png_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.png')
+                            csv_writer = CSVWriter(csv_file)
+                            stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+
+                            wandb.init(
+                                        project=args.project_name,
+                                        entity='drone-mechanics',
+                                        sync_tensorboard=True,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                            'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
+                                            'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
+                                            'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
+                                            'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': val[i],'normalize advantage': normalize_adv,
+                                            'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': args.exp_name
+                                        },
+                                        dir=os.getcwd(),
+                                        name=exp_name,
+                                        monitor_gym=True,
+                                        save_code=True
+                            )
+
+                            # Train loop
+                            train(env,
+                                in_dim=obs_dim, 
+                                out_dim=act_dim,
+                                total_training_steps=total_training_steps,
+                                gae_lambda=val[i],
+                                exp_path=exp_folder_name,
+                                exp_name=exp_name,
+                                normalize_adv=normalize_adv,
+                                normalize_ret=normalize_ret)
+
+                            # clean up
+                            logging.info("---- Done ----")
+                            env.close()
+                            wandb.run.finish() if wandb and wandb.run else None
+
+                    case 'epsilon (adam optimizer)':
+                        for i in range(0, len(val)):
+                            
+                            # setup env
+                            env = make_env(env_name, seed=seed)
+                            
+                            # Settup project
+                            exp_name = f"exp_name: {env_name}_{CURR_DATE} ({key}: {val[i]})"
+                            exp_folder_name = f'{LOG_PATH}exp_{env_name}_{CURR_TIME}'
+                            create_path(exp_folder_name)
+                            # create model folder
+                            model_path = os.path.join(exp_folder_name, 'models')
+                            create_path(model_path)
+
+                            # create CSV writer
+                            csv_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.csv')
+                            png_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.png')
+                            csv_writer = CSVWriter(csv_file)
+                            stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+
+                            wandb.init(
+                                        project=args.project_name,
+                                        entity='drone-mechanics',
+                                        sync_tensorboard=True,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                            'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
+                                            'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
+                                            'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': val[i],
+                                            'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
+                                            'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': args.exp_name
+                                        },
+                                        dir=os.getcwd(),
+                                        name=exp_name,
+                                        monitor_gym=True,
+                                        save_code=True
+                            )
+
+                            # Train loop
+                            train(env,
+                                in_dim=obs_dim, 
+                                out_dim=act_dim,
+                                total_training_steps=total_training_steps,
+                                adam_epsilon=val[i],
+                                exp_path=exp_folder_name,
+                                exp_name=exp_name,
+                                normalize_adv=normalize_adv,
+                                normalize_ret=normalize_ret)
+
+                            # clean up
+                            logging.info("---- Done ----")
+                            env.close()
+                            wandb.run.finish() if wandb and wandb.run else None
+
+                    case 'number of epochs for update':
+                        for i in range(0, len(val)):
+                            
+                            # setup env
+                            env = make_env(env_name, seed=seed)
+                            
+                            # Settup project
+                            exp_name = f"exp_name: {env_name}_{CURR_DATE} ({key}: {val[i]})"
+                            exp_folder_name = f'{LOG_PATH}exp_{env_name}_{CURR_TIME}'
+                            create_path(exp_folder_name)
+                            # create model folder
+                            model_path = os.path.join(exp_folder_name, 'models')
+                            create_path(model_path)
+
+                            # create CSV writer
+                            csv_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.csv')
+                            png_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.png')
+                            csv_writer = CSVWriter(csv_file)
+                            stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+
+                            wandb.init(
+                                        project=args.project_name,
+                                        entity='drone-mechanics',
+                                        sync_tensorboard=True,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                            'batches per episode': n_rollout_steps,'number of epochs for update': val[i],'input layer size': obs_dim,'output layer size': act_dim,
+                                            'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
+                                            'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
+                                            'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
+                                            'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': args.exp_name
+                                        },
+                                        dir=os.getcwd(),
+                                        name=exp_name,
+                                        monitor_gym=True,
+                                        save_code=True
+                            )
+                            # Train loop
+
+                            train(env,
+                                in_dim=obs_dim, 
+                                out_dim=act_dim,
+                                total_training_steps=total_training_steps,
+                                n_optepochs=val[i],
+                                exp_path=exp_folder_name,
+                                exp_name=exp_name,
+                                normalize_adv=normalize_adv,
+                                normalize_ret=normalize_ret)
+
+                            # clean up
+                            logging.info("---- Done ----")
+                            env.close()
+                            wandb.run.finish() if wandb and wandb.run else None
+
+                    case 'max sampled trajectories':
+                        for i in range(0, len(val)):
+                            
+                            # setup env
+                            env = make_env(env_name, seed=seed)
+                            
+                            # Settup project
+                            exp_name = f"exp_name: {env_name}_{CURR_DATE} ({key}: {val[i]})"
+                            exp_folder_name = f'{LOG_PATH}exp_{env_name}_{CURR_TIME}'
+                            create_path(exp_folder_name)
+                            # create model folder
+                            model_path = os.path.join(exp_folder_name, 'models')
+                            create_path(model_path)
+
+                            # create CSV writer
+                            csv_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.csv')
+                            png_file = os.path.join(exp_folder_name, f'{env_name}_{CURR_TIME}.png')
+                            csv_writer = CSVWriter(csv_file)
+                            stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+
+                            wandb.init(
+                                        project=args.project_name,
+                                        entity='drone-mechanics',
+                                        sync_tensorboard=True,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': val[i],
+                                            'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
+                                            'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
+                                            'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
+                                            'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
+                                            'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': args.exp_name
+                                        },
+                                        dir=os.getcwd(),
+                                        name=exp_name,
+                                        monitor_gym=True,
+                                        save_code=True
+                            )
+
+                            # Train loop
+                            train(env,
+                                in_dim=obs_dim, 
+                                out_dim=act_dim,
+                                total_training_steps=total_training_steps,
+                                batch_size=val[i],
+                                exp_path=exp_folder_name,
+                                exp_name=exp_name,
+                                normalize_adv=normalize_adv,
+                                normalize_ret=normalize_ret)
+
+                            # clean up
+                            logging.info("---- Done ----")
+                            env.close()
+                            wandb.run.finish() if wandb and wandb.run else None
+
+                    case _:
+                        env.close()
+                        wandb.run.finish() if wandb and wandb.run else None
+                        AssertionError('Incorrect params!')            
 
     else:
         assert("Needs training (--train), testing (--test) or hyperparameter tuning (--hyperparam) flag set!")
