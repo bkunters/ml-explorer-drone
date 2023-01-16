@@ -1,16 +1,9 @@
-import stable_baselines3
-import gym
-import numpy as np
 from stable_baselines3 import PPO
-from stable_baselines3.ppo import MlpPolicy
-from stable_baselines3.common.evaluation import evaluate_policy
-import csv
 import wandb
-
 from stable_baselines3.common.logger import configure
 import pandas as pd
 
-tmp_path = "tmp/sb3_log/"
+tmp_path = "tmp/"
 # set up logger
 new_logger = configure(tmp_path, ["csv"])
 
@@ -30,17 +23,18 @@ run = wandb.init(
     config=config,
     entity='drone-mechanics'
 )
-info = pd.read_csv('tmp/sb3_log/progress.csv')
-steps = info['time/total_timesteps']
-mean_episode_reward = info['rollout/ep_rew_mean']
-ep_lenth = info['rollout/ep_len_mean']
-ep_time = info['time/time_elapsed']
-for i in range(len(steps)):
-    wandb.log({
-        'info/timesteps': steps[i],
-        'info/episodic returns': mean_episode_reward[i],
-        'info/episodic length': ep_lenth[i],
-        'info/episodic time': ep_time[i]
+
+info = pd.read_csv('tmp/progress.csv')
+    steps = info['time/total_timesteps']
+    mean_episode_reward = info['rollout/ep_rew_mean']
+    ep_lenth = info['rollout/ep_len_mean']
+    ep_time = info['time/time_elapsed']
+    for i in range(len(steps)):
+        wandb.log({
+            'info/timesteps': steps[i],
+            'info/episodic returns': mean_episode_reward[i],
+            'info/episodic length': ep_lenth[i],
+            'info/episodic time': ep_time[i]
         })
 
 run.finish()
