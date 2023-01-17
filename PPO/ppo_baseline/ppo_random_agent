@@ -1,0 +1,60 @@
+import gym
+import numpy as np
+import pandas as pd
+import csv
+import wandb
+
+if __name__ == '__main__':
+    env = gym.make('Pendulum-v1')
+    n_steps = 2048
+    max_batch_size = 512
+    total_steps = 3_000_000
+    step = 0
+
+    config = {
+        "policy_type": "MlpPolicy",
+        "total_timesteps": 3_000_000,
+        "env_name": "Pendulum-v1",
+        "n_steps": 2048,
+    }
+
+    run = wandb.init(
+        project="log_test_zhengjie",
+        config=config,
+        entity='drone-mechanics',
+        name='stable_baselines3'
+    )
+
+    # f_csv = open('tmp/random_agent.csv', 'w', newline='')
+    # writer = csv.writer(f_csv, delimiter=',')
+    # writer.writerow(['step', 'mean_reward'])
+
+    while(step<total_steps):
+        t_step = 0
+        n_episodes_rewards = []
+        while(t_step < n_steps):
+            obs = env.reset()
+            reward_per_ep = 0
+
+            for t_episode in range(max_batch_size):
+                env.render()
+
+                action = env.action_space.sample()
+                obs, reward, done, info = env.step(action)
+                step += 1
+                t_step += 1
+                reward_per_ep += reward
+                if done:
+                    break
+            n_episodes_rewards.append(reward_per_ep)
+        mean_episodes_reward = np.mean(n_episodes_rewards)
+
+        wandb.log({
+            'mean_episodes_rewards': mean_episodes_reward,
+        }, step=step)
+
+        # writer.writerow([step, mean_episodes_reward])
+        # f_csv.flush()
+        # print(step, mean_episodes_reward)
+    # f_csv.close()
+    env.close()
