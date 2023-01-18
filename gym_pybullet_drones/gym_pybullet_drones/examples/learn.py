@@ -25,12 +25,13 @@ from stable_baselines3.a2c import MlpPolicy
 from stable_baselines3.common.env_checker import check_env
 import ray
 from ray.tune import register_env
-#from ray.rllib.agents import ppo
+# from ray.rllib.agents import ppo
 
 from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.envs.single_agent_rl.TakeoffAviary import TakeoffAviary
 from gym_pybullet_drones.utils.utils import sync, str2bool
 
+# import own modules
 import ppo
 
 DEFAULT_RLLIB = True
@@ -39,48 +40,58 @@ DEFAULT_RECORD_VIDEO = False
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
 
-def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI, plot=True, colab=DEFAULT_COLAB, record_video=DEFAULT_RECORD_VIDEO):
+def make_env(env_id, seed=42):
+    env = gym.make(env_id)
+    env.seed(seed)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+    return env
 
+def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI, plot=True, colab=DEFAULT_COLAB, record_video=DEFAULT_RECORD_VIDEO, seed=42):
+    #####################
     #### Check the environment's spaces ########################
-    env = gym.make("takeoff-aviary-v0")
+    #####################
+    env = make_env("takeoff-aviary-v0", seed=seed)
+
     print("[INFO] Action space:", env.action_space)
     print("[INFO] Observation space:", env.observation_space)
+
     #print(env.action_space.sample())
     check_env(env,
               warn=True,
               skip_render_check=True
               )
 
+    #####################
     #### Train the model #######################################
+    #####################
+
     if not rllib:
         model = A2C(MlpPolicy,
                     env,
                     verbose=1
                     )
-        model.learn(total_timesteps=10000) # Typically not enough
+        model.learn(total_timesteps=10_000) # Typically not enough
     else:
-        ray.shutdown()
-        ray.init(ignore_reinit_error=True)
-        register_env("takeoff-aviary-v0", lambda _: TakeoffAviary())
-        #config = ppo.DEFAULT_CONFIG.copy()
-        #config["num_workers"] = 2
-        #config["framework"] = "torch"
-        #config["env"] = "takeoff-aviary-v0"
-        '''agent = ppo.PPOTrainer(config)
-        for i in range(3): # Typically not enough
-            results = agent.train()
-            print("[INFO] {:d}: episode_reward max {:f} min {:f} mean {:f}".format(i,
-                                                                                   results["episode_reward_max"],
-                                                                                   results["episode_reward_min"],
-                                                                                   results["episode_reward_mean"]
-                                                                                   )
-                  )
-        policy = agent.get_policy()'''
-        ppo.env_name = "takeoff-aviary-v0"
-        ppo.train()
-        ray.shutdown()
+        trainer = ppo.PPOTrainer(env,
+                        total_training_steps=2_000_000,
+                        n_optepochs=64,
+                        gae_lambda=0.92,
+                        gamma=0.95,
+                        )
+        # train PPO
+        agent = trainer.create_ppo()
+        agent.learn()
+        # cleanup
+        trainer.shutdown()
 
-    #### Show (and record a video of) the model's performance ##
+    #####################
+    #### Show (and record a video of) the model's performance ####
+    #####################
+
+    # get trained policy
+    policy_net = trainer.get_policy()
+
     env = TakeoffAviary(gui=gui,
                         record=record_video
                         )
@@ -97,7 +108,7 @@ def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI
                                             deterministic=True
                                             )
         else:
-            action = ppo.policy_net(obs.reshape(1,ppo_tf.input_length_net))
+            action = policy_net(obs).detach().numpy()
         obs, reward, done, info = env.step(action)
         logger.log(drone=0,
                    timestamp=i/env.SIM_FREQ,
@@ -118,10 +129,10 @@ def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI
 if __name__ == "__main__":
     #### Define and parse (optional) arguments for the script ##
     parser = argparse.ArgumentParser(description='Single agent reinforcement learning example script using TakeoffAviary')
-    parser.add_argument('--rllib',      default=DEFAULT_RLLIB,        type=str2bool,       help='Whether to use RLlib PPO in place of stable-baselines A2C (default: False)', metavar='')
+    parser.add_argument('--rllib',              default=DEFAULT_RLLIB,        type=str2bool,       help='Whether to use RLlib PPO in place of stable-baselines A2C (default: False)', metavar='')
     parser.add_argument('--gui',                default=DEFAULT_GUI,       type=str2bool,      help='Whether to use PyBullet GUI (default: True)', metavar='')
     parser.add_argument('--record_video',       default=DEFAULT_RECORD_VIDEO,      type=str2bool,      help='Whether to record a video (default: False)', metavar='')
-    parser.add_argument('--output_folder',     default=DEFAULT_OUTPUT_FOLDER, type=str,           help='Folder where to save logs (default: "results")', metavar='')
+    parser.add_argument('--output_folder',      default=DEFAULT_OUTPUT_FOLDER, type=str,           help='Folder where to save logs (default: "results")', metavar='')
     parser.add_argument('--colab',              default=DEFAULT_COLAB, type=bool,           help='Whether example is being run by a notebook (default: "False")', metavar='')
     ARGS = parser.parse_args()
 

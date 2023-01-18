@@ -73,7 +73,7 @@ class StatsPlotter:
         if wandb:
             wandb.log({'Mean Episodic Time': plt})
 
-    def plot_seaborn_fill(self, dataframe, x, y, y_min, y_max, title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=0, lower_bound=-1800, xlim_up=3_000_000, ylim_low=-2000, ylim_up=200, color='blue', smoothing=2, wandb=None):
+    def plot_seaborn_fill(self, dataframe, x, y, y_min, y_max, title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=1.0, lower_bound=-1.0, xlim_up=2_000_000, ylim_low=-1.0, ylim_up=1, color='blue', smoothing=2, wandb=None):
         # get values from df
         # add smoothing
         df_min = gaussian_filter1d(dataframe[y_min].to_numpy(), sigma=smoothing)

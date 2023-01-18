@@ -1,3 +1,18 @@
+"""
+Class  PPO_PolicyGradient is used as a learning for PPO algorithms.
+
+Example
+-------
+In a terminal, run as:
+
+    $ python ppo.py
+
+Notes
+-----
+
+
+"""
+
 from collections import deque
 import time
 import torch
@@ -13,6 +28,11 @@ import argparse
 from stable_baselines3 import PPO
 # gym environment
 import gym
+
+# video logging
+from matplotlib import animation
+import matplotlib.pyplot as plt
+import numpy as np
 
 # logging python
 import logging
@@ -37,14 +57,6 @@ RESULTS_PATH = './results/'
 CURR_DATE = datetime.today().strftime('%Y-%m-%d')
 CURR_TIME = datetime.now().strftime("%Y%m%d-%H%M%S")
 
-
-####################
-####### TODO #######
-####################
-
-# Hint: Please if working on it mark a todo as (done) if done
-# 1) Check current implementation against article: https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/
-# 3) Check calculation of advantage and GAE
 
 ####################
 ####################
@@ -123,7 +135,7 @@ class PPO_PolicyGradient_V1:
         in_dim, 
         out_dim,
         total_training_steps,
-        batch_size,
+        max_trajectory_size,
         n_rollout_steps,
         n_optepochs=5,
         lr_p=1e-3,
@@ -146,7 +158,7 @@ class PPO_PolicyGradient_V1:
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.total_training_steps = total_training_steps
-        self.batch_size = batch_size
+        self.max_trajectory_size = max_trajectory_size
         self.n_rollout_steps = n_rollout_steps
         self.n_optepochs = n_optepochs
         self.lr_p = lr_p
@@ -169,7 +181,7 @@ class PPO_PolicyGradient_V1:
         self.log_video = log_video
 
         # keep track of rewards per episode
-        self.ep_returns = deque(maxlen=batch_size)
+        self.ep_returns = deque(maxlen=max_trajectory_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
         self.stats_data = {
@@ -212,7 +224,7 @@ class PPO_PolicyGradient_V2:
         :param env: The environment to learn from (if registered in Gym)
         :param learning_rate: The learning rate, it can be a function
         of the current progress remaining (from 1 to 0)
-        :param batch_size: Minibatch size of collected experiences
+        :param max_trajectory_size: Minibatch size of collected experiences
         :param n_optepochs: Number of epoch when optimizing the surrogate loss
         :param gamma: Discount factor
         :param gae_lambda: Factor for trade-off of bias vs variance for Generalized Advantage Estimator
@@ -233,7 +245,7 @@ class PPO_PolicyGradient_V2:
         in_dim, 
         out_dim,
         total_training_steps,
-        batch_size,
+        max_trajectory_size,
         n_rollout_steps,
         n_optepochs=5,
         lr_p=1e-3,
@@ -250,6 +262,7 @@ class PPO_PolicyGradient_V2:
         csv_writer=None,
         stats_plotter=None,
         log_video=False,
+        video_log_steps=100,
         device='cpu',
         exp_path='./log/',
         exp_name='PPO_V2_experiment',
@@ -260,7 +273,7 @@ class PPO_PolicyGradient_V2:
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.total_training_steps = total_training_steps
-        self.batch_size = batch_size
+        self.max_trajectory_size = max_trajectory_size
         self.n_rollout_steps = n_rollout_steps
         self.n_optepochs = n_optepochs
         self.lr_p = lr_p
@@ -286,9 +299,10 @@ class PPO_PolicyGradient_V2:
         self.exp_name = exp_name
         # track video of gym
         self.log_video = log_video
+        self.video_log_steps = video_log_steps
 
         # keep track of rewards per episode
-        self.ep_returns = deque(maxlen=batch_size)
+        self.ep_returns = deque(maxlen=max_trajectory_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
         self.stats_data = {
@@ -563,9 +577,11 @@ class PPO_PolicyGradient_V2:
         pass 
 
     def collect_rollout(self, n_steps=1):
-        """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)"""
+        """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)
+           # TODO: rollout length - 2048 t0 4096
+        """
         
-        t_step, rewards = 0, []
+        t_step, rewards, frames = 0, [], deque(maxlen=24) # 4 fps - 6 sec
 
         # log time
         episode_time = []
@@ -584,7 +600,7 @@ class PPO_PolicyGradient_V2:
         while t_step < n_steps:
             
             # rewards collected
-            rewards, done = [], False 
+            rewards, done, frames = [], False, []
             obs = self.env.reset()
 
             # measure time elapsed for one episode
@@ -593,10 +609,10 @@ class PPO_PolicyGradient_V2:
 
             # Run episode for a fixed amount of timesteps
             # to keep rollout size fixed and episodes independent
-            for t_batch in range(0, self.batch_size):
+            for t_batch in range(0, self.max_trajectory_size):
                 # render gym envs
                 if self.render_video and t_batch % self.render_steps == 0:
-                    self.env.render()
+                    frames.append(self.env.render(mode="rgb_array"))
                 
                 t_step += 1 
 
@@ -642,7 +658,7 @@ class PPO_PolicyGradient_V2:
         action_log_probs = torch.tensor(np.array(episode_action_probs), device=self.device, dtype=torch.float)
         dones = torch.tensor(np.array(episode_dones), device=self.device, dtype=torch.float)
 
-        return obs, next_obs, actions, action_log_probs, dones, episode_rewards, episode_lens, np.array(episode_time)
+        return obs, next_obs, actions, action_log_probs, dones, episode_rewards, episode_lens, np.array(episode_time), frames
                 
 
     def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
@@ -672,7 +688,7 @@ class PPO_PolicyGradient_V2:
             # Collect data over one episode
             # Episode = recording of actions and states that an agent performed from a start state to an end state
             # STEP 3: simulate and collect trajectories --> the following values are all per batch over one episode
-            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time = self.collect_rollout(n_steps=self.n_rollout_steps)
+            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time, frames = self.collect_rollout(n_steps=self.n_rollout_steps)
 
             # experiences simulated so far
             training_steps += np.sum(ep_lens)
@@ -681,9 +697,9 @@ class PPO_PolicyGradient_V2:
             values, _ , _ = self.get_values(obs, actions)
             # Calculate advantage function
             # advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            # advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
             # update network params 
             for _ in range(self.n_optepochs):
@@ -696,7 +712,7 @@ class PPO_PolicyGradient_V2:
 
             # log all statistical values to CSV
             self.log_stats(policy_losses, value_losses, rewards, ep_lens, training_steps, ep_time, done_so_far, exp_name=self.exp_name)
-            
+
             # increment for each iteration
             done_so_far += 1
 
@@ -729,6 +745,16 @@ class PPO_PolicyGradient_V2:
                     for value in self.stats_data.values():
                         del value[:]
 
+                # Log to video
+                if self.render_video and done_so_far % self.video_log_steps == 0:
+                    filename='pendulum_v1.gif'
+                    self.save_frames_as_gif(frames, self.exp_path, filename)
+                    wandb.log({
+                        "train/video": wandb.Video(os.path.join(self.exp_path, filename), 
+                        caption='episode: '+str(done_so_far), 
+                        fps=4, format="gif"), "step": done_so_far
+                        })
+
         # Finalize and plot stats
         if self.stats_plotter:
             df = self.stats_plotter.read_csv() # read all files in folder
@@ -745,6 +771,20 @@ class PPO_PolicyGradient_V2:
             # Save any files starting with "ppo"
             wandb.save(os.path.join(wandb.run.dir, "ppo*"))
 
+    def save_frames_as_gif(self, frames, path='./', filename='pendulum_v1.gif'):
+
+        #Mess with this to change frame size
+        plt.figure(figsize=(frames[0].shape[1] / 72.0, frames[0].shape[0] / 72.0), dpi=72)
+
+        patch = plt.imshow(frames[0])
+        plt.axis('off')
+
+        def animate(i):
+            patch.set_data(frames[i])
+
+        anim = animation.FuncAnimation(plt.gcf(), animate, frames=len(frames), interval=50)
+        video_path = os.path.join(path, filename)
+        anim.save(video_path, writer='imagemagick', fps=60)
 
     def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, done_so_far, exp_name='experiment'):
         """Calculate stats and log to W&B, CSV, logger """
@@ -796,9 +836,11 @@ class PPO_PolicyGradient_V2:
         logging.info('\n')
         logging.info(f'------------ Episode: {training_steps} --------------')
         logging.info(f"Mean return:          {mean_ep_ret}")
+        logging.info(f"Min return:           {min_ep_ret}")
+        logging.info(f"Max return:           {max_ep_ret}")
         logging.info(f"Mean policy loss:     {mean_p_loss}")
         logging.info(f"Mean value loss:      {mean_v_loss}")
-        logging.info('--------------------------------------------')
+        logging.info('-----------------------------------------------------')
         logging.info('\n')
 
 ####################
@@ -914,10 +956,10 @@ def _log_summary(ep_len, ep_ret, ep_num):
         logging.info(f"--------------------------------------------")
         logging.info('\n')
 
-def train(env, in_dim, out_dim, total_training_steps, batch_size=512, n_rollout_steps=2048,
+def train(env, in_dim, out_dim, total_training_steps, max_trajectory_size=512, n_rollout_steps=2048,
           n_optepochs=32, learning_rate_p=1e-4, learning_rate_v=1e-3, gae_lambda=0.95, gamma=0.99, epsilon=0.2,
           adam_epsilon=1e-8, render_steps=10, render_video=False, save_steps=10, csv_writer=None, stats_plotter=None,
-          normalize_adv=False, normalize_ret=False, log_video=False, ppo_version='v2', 
+          normalize_adv=False, normalize_ret=False, log_video=False, video_log_steps=1000, ppo_version='v2', 
           device='cpu', exp_path='./log/', exp_name='PPO-experiment'):
     """Train the policy network (actor) and the value network (critic) with PPO (clip version)"""
     agent = None
@@ -927,7 +969,7 @@ def train(env, in_dim, out_dim, total_training_steps, batch_size=512, n_rollout_
                     in_dim=in_dim, 
                     out_dim=out_dim,
                     total_training_steps=total_training_steps,
-                    batch_size=batch_size,
+                    max_trajectory_size=max_trajectory_size,
                     n_rollout_steps=n_rollout_steps,
                     n_optepochs=n_optepochs,
                     lr_p=learning_rate_p,
@@ -944,31 +986,10 @@ def train(env, in_dim, out_dim, total_training_steps, batch_size=512, n_rollout_
                     csv_writer=csv_writer,
                     stats_plotter=stats_plotter,
                     log_video=log_video,
+                    video_log_steps=video_log_steps,
                     device=device,
                     exp_path=exp_path,
                     exp_name=exp_name)
-    else:
-        agent = PPO_PolicyGradient_V1(
-                    env, 
-                    in_dim=in_dim, 
-                    out_dim=out_dim,
-                    total_training_steps=total_training_steps,
-                    batch_size=batch_size,
-                    n_rollout_steps=n_rollout_steps,
-                    n_optepochs=n_optepochs,
-                    lr_p=learning_rate_p,
-                    lr_v=learning_rate_v,
-                    gae_lambda = gae_lambda,
-                    gamma=gamma,
-                    epsilon=epsilon,
-                    adam_eps=adam_epsilon,
-                    render_steps=render_steps,
-                    render_video=render_video,
-                    save_model=save_steps,
-                    csv_writer=csv_writer,
-                    stats_plotter=stats_plotter,
-                    log_video=log_video,
-                    device=device)
     # run training for a total amount of steps
     agent.learn()
 
@@ -992,7 +1013,7 @@ def hyperparam_tuning(config=None):
                 in_dim=config.obs_dim, 
                 out_dim=config.act_dim,
                 total_training_steps=config.total_training_steps,
-                batch_size=config.batch_size,
+                max_trajectory_size=config.max_trajectory_size,
                 n_rollout_steps=config.n_rollout_steps,
                 n_optepochs=config.n_optepochs,
                 gae_lambda = config.gae_lambda,
@@ -1021,25 +1042,26 @@ if __name__ == '__main__':
     create_path(RESULTS_PATH)
     
     # Hyperparameter
-    total_training_steps = 1_500_000     # time steps regarding batches collected and train agent
-    batch_size = 1024                    # max number of episode samples to be sampled per time step. 
+    total_training_steps = 1_200_000     # time steps regarding batches collected and train agent
+    max_trajectory_size = 1024                    # max number of episode samples to be sampled per time step. 
     n_rollout_steps = 2048               # number of batches per episode, or experiences to collect per environment
-    n_optepochs = 32                     # Number of epochs per time step to optimize the neural networks
+    n_optepochs = 64                     # Number of epochs per time step to optimize the neural networks
     learning_rate_p = 1e-4               # learning rate for policy network
     learning_rate_v = 1e-3               # learning rate for value network
-    gae_lambda = 0.9                     # factor for trade-off of bias vs variance for GAE
-    gamma = 0.96                         # discount factor
+    gae_lambda = 0.92                    # factor for trade-off of bias vs variance for GAE
+    gamma = 0.95                         # discount factor
     adam_epsilon = 1e-7                  # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
     epsilon = 0.2                        # clipping factor
     clip_range_vf = 0.2                  # clipping factor for the value loss function. Depends on reward scaling.
     env_name = 'Pendulum-v1'             # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0', 'takeoff-aviary-v0'
     env_number = 1                       # number of actors
     seed = 42                            # seed gym, env, torch, numpy 
-    normalize_adv = True                 # wether to normalize the advantage estimate
-    normalize_ret = True                # wether to normalize the return function
+    normalize_adv = False                # wether to normalize the advantage estimate
+    normalize_ret = True                 # wether to normalize the return function
     
     # setup for torch save models and rendering
     render_video = False
+    video_log_steps = 1000
     render_steps = 10
     save_steps = 100
 
@@ -1102,7 +1124,7 @@ if __name__ == '__main__':
                     'env name': env_name,
                     'env number': env_number,
                     'total_training_steps': total_training_steps,
-                    'max sampled trajectories': batch_size,
+                    'max sampled trajectories': max_trajectory_size,
                     'batches per episode': n_rollout_steps,
                     'number of epochs for update': n_optepochs,
                     'input layer size': obs_dim,
@@ -1135,7 +1157,7 @@ if __name__ == '__main__':
             in_dim=obs_dim, 
             out_dim=act_dim,
             total_training_steps=total_training_steps,
-            batch_size=batch_size,
+            max_trajectory_size=max_trajectory_size,
             n_rollout_steps=n_rollout_steps,
             n_optepochs=n_optepochs,
             learning_rate_p=learning_rate_p, 
@@ -1152,6 +1174,7 @@ if __name__ == '__main__':
             csv_writer=csv_writer,
             stats_plotter=stats_plotter,
             log_video=args.video,
+            video_log_steps=video_log_steps,
             device=device,
             exp_path=exp_folder_name,
             exp_name=exp_name)
@@ -1179,6 +1202,7 @@ if __name__ == '__main__':
         for key, val in param_dict.items():
             logging.info(f'Hyperparam Tuning \n----- Key: {key} -----\n')
             logging.info(f'Hyperparam Tuning \n----- Values: {val} -----\n')
+            
             match key:
                     case 'learning rate (policy net)':
                         for i in range(0, len(val)):
@@ -1204,7 +1228,7 @@ if __name__ == '__main__':
                                         project=args.project_name,
                                         entity='drone-mechanics',
                                         sync_tensorboard=True,
-                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
                                             'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                             'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                             'learning rate (policy net)': val[i],'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1256,7 +1280,7 @@ if __name__ == '__main__':
                                         project=args.project_name,
                                         entity='drone-mechanics',
                                         sync_tensorboard=True,
-                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
                                             'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                             'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                             'learning rate (policy net)': learning_rate_p,'learning rate (value net)': val[i],'epsilon (adam optimizer)': adam_epsilon,
@@ -1308,7 +1332,7 @@ if __name__ == '__main__':
                                         project=args.project_name,
                                         entity='drone-mechanics',
                                         sync_tensorboard=True,
-                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
                                             'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                             'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                             'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1360,7 +1384,7 @@ if __name__ == '__main__':
                                         project=args.project_name,
                                         entity='drone-mechanics',
                                         sync_tensorboard=True,
-                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
                                             'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                             'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                             'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1412,7 +1436,7 @@ if __name__ == '__main__':
                                         project=args.project_name,
                                         entity='drone-mechanics',
                                         sync_tensorboard=True,
-                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
                                             'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                             'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                             'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1465,7 +1489,7 @@ if __name__ == '__main__':
                                         project=args.project_name,
                                         entity='drone-mechanics',
                                         sync_tensorboard=True,
-                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
                                             'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                             'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                             'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': val[i],
@@ -1518,7 +1542,7 @@ if __name__ == '__main__':
                                         project=args.project_name,
                                         entity='drone-mechanics',
                                         sync_tensorboard=True,
-                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': batch_size,
+                                        config={ 'env name': env_name, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
                                             'batches per episode': n_rollout_steps,'number of epochs for update': val[i],'input layer size': obs_dim,'output layer size': act_dim,
                                             'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                             'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1589,7 +1613,7 @@ if __name__ == '__main__':
                                 in_dim=obs_dim, 
                                 out_dim=act_dim,
                                 total_training_steps=total_training_steps,
-                                batch_size=val[i],
+                                max_trajectory_size=val[i],
                                 exp_path=exp_folder_name,
                                 exp_name=exp_name,
                                 normalize_adv=normalize_adv,
