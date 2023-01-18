@@ -36,7 +36,7 @@ import ppo
 
 DEFAULT_RLLIB = True
 DEFAULT_GUI = True
-DEFAULT_RECORD_VIDEO = False
+DEFAULT_RECORD_VIDEO = True
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
 
@@ -48,6 +48,7 @@ def make_env(env_id, seed=42):
     return env
 
 def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI, plot=True, colab=DEFAULT_COLAB, record_video=DEFAULT_RECORD_VIDEO, seed=42):
+    
     #####################
     #### Check the environment's spaces ########################
     #####################
@@ -74,7 +75,7 @@ def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI
         model.learn(total_timesteps=10_000) # Typically not enough
     else:
         trainer = ppo.PPOTrainer(env,
-                        total_training_steps=2_000_000,
+                        total_training_steps=3_000_000,
                         n_optepochs=64,
                         gae_lambda=0.92,
                         gamma=0.95,
@@ -82,15 +83,16 @@ def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI
         # train PPO
         agent = trainer.create_ppo()
         agent.learn()
+
+        # get trained policy
+        policy = trainer.get_policy()
+
         # cleanup
         trainer.shutdown()
 
     #####################
     #### Show (and record a video of) the model's performance ####
     #####################
-
-    # get trained policy
-    policy_net = trainer.get_policy()
 
     env = TakeoffAviary(gui=gui,
                         record=record_video
@@ -108,7 +110,8 @@ def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI
                                             deterministic=True
                                             )
         else:
-            action = policy_net(obs).detach().numpy()
+            action = policy(obs).detach().numpy()
+        
         obs, reward, done, info = env.step(action)
         logger.log(drone=0,
                    timestamp=i/env.SIM_FREQ,

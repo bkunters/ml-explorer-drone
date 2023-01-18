@@ -560,7 +560,7 @@ class PPO_PolicyGradient:
 
                 # STEP 3: collecting set of trajectories D_k by running action
                 # that was sampled from policy in environment
-                __obs, reward, done, truncated = self.env.step(action)
+                __obs, reward, done, info = self.env.step(action)
 
                 # collection of trajectories in batches
                 episode_obs.append(obs)
@@ -573,7 +573,7 @@ class PPO_PolicyGradient:
                 obs = __obs
 
                 # break out of loop if episode is terminated
-                if done or truncated:
+                if done:
                     break
 
             # stop time per episode
@@ -759,9 +759,7 @@ class PPO_PolicyGradient:
         mean_ep_ret = round(np.mean(cum_ret), 6)
         max_ep_ret = round(np.max(cum_ret), 6)
         min_ep_ret = round(np.min(cum_ret), 6)
-
-        # calculate standard deviation (spred of distribution)
-        std_ep_rew = round(np.std(cum_ret), 6)
+        std_ep_rew = round(np.std(cum_ret), 6) # standard deviation (spred of distribution)
 
         # Log stats to CSV file
         self.stats_data['episodes'].append(done_so_far)
@@ -854,7 +852,7 @@ def create_path(path: str) -> None:
 
 def load_model(path, model, device='cpu'):
     checkpoint = torch.load(path)
-    model.load_state_dict(checkpoint['model_state_dict'], map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
     return model
 
 
@@ -1039,6 +1037,19 @@ class PPOTrainer:
                 normalize_ret=self.normalize_return)
         return agent
     
+    def hyperparam_tuning(self):
+        # TODO
+        param_dict = {
+                'learning rate (policy net)': [1e-5, 1e-4, 1e-3, 1e-2],
+                'learning rate (value net)': [1e-5, 1e-4, 1e-3, 1e-2],
+                'gamma (discount)': [0.95, 0.96, 0.97, 0.98, 0.99],
+                'epsilon (clip_range)': [0.1, 0.2, 0.22, 0.24,0.3],
+                'gae lambda (GAE)': [0.9, 0.93, 0.95, 0.96, 0.97, 0.99, 1.0],
+                'epsilon (adam optimizer)': [1e-9, 1e-8, 1e-7, 1e-6, 1e-5],
+                'number of epochs for update': [8, 16, 32, 64, 128, 256],
+                'max sampled trajectories': [32, 64, 128, 256, 512, 1024, 2048, 4096]
+        }
+
     def shutdown(self):
         # cleanup 
         if self.env:
