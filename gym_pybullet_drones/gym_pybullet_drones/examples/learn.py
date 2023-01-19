@@ -34,8 +34,8 @@ from gym_pybullet_drones.utils.utils import sync, str2bool
 # import own modules
 import ppo
 
-DEFAULT_ENVID = "takeoff-aviary-v0"
-DEFAULT_ENTRY = 'gym_pybullet_drones.envs.single_agent_rl:TakeoffAviary'
+DEFAULT_ENVID = "takeoff-aviary-v0" #'hover-aviary-v0'
+DEFAULT_ENTRY = 'gym_pybullet_drones.envs.single_agent_rl:TakeoffAviary' #'gym_pybullet_drones.envs.single_agent_rl:HoverAviary'
 DEFAULT_RLLIB = True
 DEFAULT_PPO = 'PPOv2'
 DEFAULT_GUI = True
@@ -64,7 +64,7 @@ def run(env_id=DEFAULT_ENVID, entry_point=DEFAULT_ENTRY, rllib=DEFAULT_RLLIB, se
     #####################
     #### Check the environment's spaces ########################
     #####################
-    env = make_env(env_id, seed=seed) #"takeoff-aviary-v0"
+    env = make_env(env_id, seed=seed, gym_wrappers=True) #"takeoff-aviary-v0"
 
     print("[INFO] Action space:", env.action_space)
     print("[INFO] Observation space:", env.observation_space)
@@ -91,7 +91,7 @@ def run(env_id=DEFAULT_ENVID, entry_point=DEFAULT_ENTRY, rllib=DEFAULT_RLLIB, se
         # our ppo-v2
         ppo.register_env(id=env_id, entry_point=entry_point)
         # get PPOTrainer
-        trainer = ppo.PPOTrainer(env, total_training_steps=10_000) # 3_000_000, everything shorter just for testing
+        trainer = ppo.PPOTrainer(env, total_training_steps=3_000_000) # 3_000_000, everything shorter just for testing
         # train PPO
         agent = trainer.create_ppo()
         agent.learn()
@@ -108,7 +108,7 @@ def run(env_id=DEFAULT_ENVID, entry_point=DEFAULT_ENTRY, rllib=DEFAULT_RLLIB, se
         config = ppo.DEFAULT_CONFIG.copy()
         config["num_workers"] = 2
         config["framework"] = "torch"
-        config["env"] = "takeoff-aviary-v0"
+        config["env"] = env_id
         agent = ppo.PPOTrainer(config)
         for i in range(3): # Typically not enough
             results = agent.train()
