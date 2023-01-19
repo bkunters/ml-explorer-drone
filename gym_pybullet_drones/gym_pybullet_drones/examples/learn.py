@@ -34,25 +34,37 @@ from gym_pybullet_drones.utils.utils import sync, str2bool
 # import own modules
 import ppo
 
+DEFAULT_ENVID = "takeoff-aviary-v0"
+DEFAULT_ENTRY = 'gym_pybullet_drones.envs.single_agent_rl:TakeoffAviary'
 DEFAULT_RLLIB = True
+DEFAULT_PPO = 'PPOv2'
 DEFAULT_GUI = True
 DEFAULT_RECORD_VIDEO = True
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
 
-def make_env(env_id, seed=42):
+def make_env(env_id, seed=42, gym_wrappers=False):
     env = gym.make(env_id)
+
+        # gym wrapper
+    if gym_wrappers:
+        env = gym.wrappers.ClipAction(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -1, 1))
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -1, 1))
+
     env.seed(seed)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     return env
 
-def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI, plot=True, colab=DEFAULT_COLAB, record_video=DEFAULT_RECORD_VIDEO, seed=42):
+def run(env_id=DEFAULT_ENVID, entry_point=DEFAULT_ENTRY, rllib=DEFAULT_RLLIB, select_ppo=DEFAULT_PPO, output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI, plot=True, colab=DEFAULT_COLAB, record_video=DEFAULT_RECORD_VIDEO, seed=42):
     
     #####################
     #### Check the environment's spaces ########################
     #####################
-    env = make_env("takeoff-aviary-v0", seed=seed)
+    env = make_env(env_id, seed=seed) #"takeoff-aviary-v0"
 
     print("[INFO] Action space:", env.action_space)
     print("[INFO] Observation space:", env.observation_space)
@@ -68,27 +80,46 @@ def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI
     #####################
 
     if not rllib:
+        # stable baseline3
         model = A2C(MlpPolicy,
                     env,
                     verbose=1
                     )
         model.learn(total_timesteps=10_000) # Typically not enough
-    else:
-        trainer = ppo.PPOTrainer(env,
-                        total_training_steps=3_000_000,
-                        n_optepochs=64,
-                        gae_lambda=0.92,
-                        gamma=0.95,
-                        )
+    
+    elif select_ppo == 'PPOv2':
+        # our ppo-v2
+        ppo.register_env(id=env_id, entry_point=entry_point)
+        # get PPOTrainer
+        trainer = ppo.PPOTrainer(env, total_training_steps=10_000) # 3_000_000, everything shorter just for testing
         # train PPO
         agent = trainer.create_ppo()
         agent.learn()
-
         # get trained policy
         policy = trainer.get_policy()
-
         # cleanup
         trainer.shutdown()
+
+    else:
+        # use ray-lib ppo
+        ray.shutdown()
+        ray.init(ignore_reinit_error=True)
+        register_env(env_id, lambda _: TakeoffAviary())
+        config = ppo.DEFAULT_CONFIG.copy()
+        config["num_workers"] = 2
+        config["framework"] = "torch"
+        config["env"] = "takeoff-aviary-v0"
+        agent = ppo.PPOTrainer(config)
+        for i in range(3): # Typically not enough
+            results = agent.train()
+            print("[INFO] {:d}: episode_reward max {:f} min {:f} mean {:f}".format(i,
+                                                                                   results["episode_reward_max"],
+                                                                                   results["episode_reward_min"],
+                                                                                   results["episode_reward_mean"]
+                                                                                   )
+            )
+        policy = agent.get_policy()
+        ray.shutdown()
 
     #####################
     #### Show (and record a video of) the model's performance ####
@@ -128,6 +159,7 @@ def run(rllib=DEFAULT_RLLIB,output_folder=DEFAULT_OUTPUT_FOLDER, gui=DEFAULT_GUI
 
     if plot:
         logger.plot()
+
 
 if __name__ == "__main__":
     #### Define and parse (optional) arguments for the script ##

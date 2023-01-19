@@ -51,10 +51,20 @@ class StatsPlotter:
             Concats all files and returns a pandas dataframe.
         """
         # find all csv files in this folder
-        csv_file = os.path.join(self.csv_folder_path, f"*.csv")
-        all_files = glob.glob(csv_file)
-        df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
-        return df
+        if os.path.exists(self.csv_folder_path):
+            csv_file = os.path.join(self.csv_folder_path, f"*.csv")
+            all_files = glob.glob(csv_file)
+            if len(all_files) > 0:
+                try:
+                    df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
+                    return df
+                except:
+                    print(f'No *csv file under {csv_file}')
+                    return None
+            else:
+                return None
+        else:
+            return None
 
     def plot_box(self, dataframe, x, y, title='title', x_label='Timestep', y_label='Mean Episodic Time', wandb=None):
         """Create a box plot for time needed to converge per experiment."""     
@@ -73,13 +83,19 @@ class StatsPlotter:
         if wandb:
             wandb.log({'Mean Episodic Time': plt})
 
-    def plot_seaborn_fill(self, dataframe, x, y, y_min, y_max, title='title', x_label='Timestep', y_label='Mean Episodic Return', upper_bound=1.0, lower_bound=-1.0, xlim_up=2_000_000, ylim_low=-1.0, ylim_up=1, color='blue', smoothing=2, wandb=None):
+    def plot_seaborn_fill(self, dataframe, x, y, y_min, y_max, title='title', x_label='Timestep', y_label='Mean Episodic Return', color='blue', smoothing=6, wandb=None):
         # get values from df
         # add smoothing
-        df_min = gaussian_filter1d(dataframe[y_min].to_numpy(), sigma=smoothing)
-        df_max = gaussian_filter1d(dataframe[y_max].to_numpy(), sigma=smoothing)
+        if smoothing:
+            df_min = gaussian_filter1d(dataframe[y_min].to_numpy(), sigma=smoothing)
+            df_max = gaussian_filter1d(dataframe[y_max].to_numpy(), sigma=smoothing)
+            df_y = gaussian_filter1d(dataframe[y].to_numpy(), sigma=smoothing)
+        else:
+            df_min = dataframe[y_min].to_numpy()
+            df_max = dataframe[y_max].to_numpy()
+            df_y = dataframe[y].to_numpy()
+            
         df_x = dataframe[x].to_numpy(dtype=int)
-        df_y = gaussian_filter1d(dataframe[y].to_numpy(), sigma=smoothing)
         # get exp names
         df_exp = dataframe['experiment'].values.astype('str')
         df_exp_unique = list(dict.fromkeys(df_exp))
@@ -87,18 +103,18 @@ class StatsPlotter:
         # draw mean line
         ax = sns.lineplot(x=df_x, y=df_y, lw=2)
         # fill std
-        ax.fill_between(x=df_x, y1=df_min, y2=df_max, color=sns.xkcd_rgb[color], alpha=0.2)
-        # draw upper and lower bounds
-        ax.axhline(lower_bound, linewidth=1, color='red', label='lower bound')
-        ax.axhline(upper_bound, linewidth=1, color='red', label='upper bound')        
+        ax.fill_between(x=df_x, y1=df_min, y2=df_max, color=sns.xkcd_rgb[color], alpha=0.2)     
         # change x-y axis scale
-        ax.set(title=title, xlabel=x_label, ylabel=y_label, xlim=(0, xlim_up), ylim=(ylim_low, ylim_up))
+        ax.set(title=title, xlabel=x_label, ylabel=y_label)
         # set legend
         plt.legend(labels=df_exp_unique, loc='upper right')
 
         # plot the file to given destination
         ax.figure.savefig(self.file_name_and_path)
-        plt.show()
+        # show for 3 sec
+        plt.show(block=False)
+        plt.pause(3)
+        plt.close()
         
         if wandb:
             images = wandb.Image(plt)

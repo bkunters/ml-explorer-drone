@@ -4,6 +4,7 @@ import torch
 from torch import nn
 from torch.optim import Adam, SGD
 from torch.distributions import MultivariateNormal
+from scipy.ndimage.filters import gaussian_filter1d
 from distutils.util import strtobool
 import numpy as np
 from datetime import datetime
@@ -13,6 +14,7 @@ import argparse
 from stable_baselines3 import PPO
 # gym environment
 import gym
+from gym.envs.registration import register
 
 # video logging
 from matplotlib import animation
@@ -166,7 +168,7 @@ class PPO_PolicyGradient:
                  learning_rate_v=1e-3,
                  gae_lambda=0.95,
                  gamma=0.99,
-                 epsilon=0.22,
+                 epsilon=0.2,
                  adam_eps=1e-5,
                  momentum=0.9,
                  adam=True,
@@ -622,7 +624,7 @@ class PPO_PolicyGradient:
         """"""
         training_steps = 0
         done_so_far = 0
-        adv_func = self.advantage_type
+
         while training_steps < self.total_training_steps:
             policy_losses, value_losses = [], []
 
@@ -639,7 +641,7 @@ class PPO_PolicyGradient:
             advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
             # Calculate advantage function
-            # match adv_func:
+            # match self.advantage_type:
             #         case 'gae':
             #             advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(
             #             ), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
@@ -713,12 +715,12 @@ class PPO_PolicyGradient:
                     })
 
         # Finalize and plot stats
-        if self.stats_plotter:
-            df = self.stats_plotter.read_csv()  # read all files in folder
-            self.stats_plotter.plot_seaborn_fill(df, x='timestep', y='mean episodic returns',
-                                                 y_min='min episodic returns', y_max='max episodic returns',
-                                                 title=f'{env_name}', x_label='Timestep', y_label='Mean Episodic Return',
-                                                 color='blue', smoothing=6, wandb=wandb, xlim_up=self.total_training_steps)
+        # if self.csv_writer and self.stats_plotter:
+        #     df = self.stats_plotter.read_csv() 
+        #     self.stats_plotter.plot_seaborn_fill(df, x='timestep', y='mean episodic returns',
+        #                                             y_min='min episodic returns', y_max='max episodic returns',
+        #                                             title=f'{env_name}', x_label='Timestep', y_label='Mean Episodic Return',
+        #                                             color='blue', smoothing=None, wandb=wandb)
         if wandb:
             # save files in path
             wandb.save(os.path.join(self.exp_path, "*csv"))
@@ -742,7 +744,7 @@ class PPO_PolicyGradient:
         video_path = os.path.join(path, filename)
         anim.save(video_path, writer='imagemagick', fps=60)
 
-    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, done_so_far, exp_name='experiment'):
+    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, done_so_far, exp_name='experiment', smoothing=None):
         """Calculate stats and log to W&B, CSV, logger """
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
@@ -754,6 +756,10 @@ class PPO_PolicyGradient:
         cum_ret = [np.sum(ep_rews) for ep_rews in batch_return]
         mean_ep_time = round(np.mean(time), 6)
         mean_ep_len = round(np.mean(episode_lens), 6)
+
+        # use gaussian smoothing
+        if smoothing:
+            max_ep_ret = gaussian_filter1d(cum_ret.to_numpy(), sigma=smoothing)
 
         # statistical values for return
         mean_ep_ret = round(np.mean(cum_ret), 6)
@@ -789,7 +795,9 @@ class PPO_PolicyGradient:
 
         logging.info('\n')
         logging.info(f'------------ Episode: {training_steps} --------------')
-        logging.info(f"Mean return:          {mean_ep_ret}")
+        logging.info(f"Max ep_return:        {max_ep_ret}")
+        logging.info(f"Min ep_return:        {min_ep_ret}")
+        logging.info(f"Mean ep_return:       {mean_ep_ret}")
         logging.info(f"Mean policy loss:     {mean_p_loss}")
         logging.info(f"Mean value loss:      {mean_v_loss}")
         logging.info('--------------------------------------------')
@@ -855,6 +863,13 @@ def load_model(path, model, device='cpu'):
     model.load_state_dict(checkpoint['model_state_dict'])
     return model
 
+def register_env(id:str, entry_point:str):
+    # register custom env with openAI gym
+    # allows it to be detected by gym
+    register(
+    id=id,
+    entry_point=entry_point,
+)
 
 ####################
 ####################
@@ -871,13 +886,13 @@ class PPOTrainer:
                 learning_rate_v=1e-3,
                 gae_lambda=0.95,
                 gamma=0.99,
-                epsilon=0.22,
+                epsilon=0.2,
                 adam_eps=1e-5,
                 momentum=0.9,
                 adam=True,
                 save_model=10,
                 log_video=False,
-                log_video_steps=100,
+                log_video_steps=10,
                 render_steps=10,
                 render_video=False,
                 device='cpu',
@@ -1052,8 +1067,7 @@ class PPOTrainer:
 
     def shutdown(self):
         # cleanup 
-        if self.env:
-            self.env.close()
+        self.env.close()
         wandb.run.finish() if wandb and wandb.run else None
 
     def get_policy(self):
