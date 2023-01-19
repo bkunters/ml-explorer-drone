@@ -130,6 +130,7 @@ class TakeoffAviary(BaseSingleAgentAviary):
             (20,)-shaped array of floats containing the normalized state of a single drone.
 
         """
+
         MAX_LIN_VEL_XY = 3 
         MAX_LIN_VEL_Z = 1
 
