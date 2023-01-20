@@ -22,7 +22,7 @@ import optuna
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
 # own implementations
-from ppo_torch.network import PolicyNet, ValueNet
+from network import PolicyNet, ValueNet
 from wrapper.stats_logger import StatsPlotter
 from wrapper.stats_logger import CSVWriter
 

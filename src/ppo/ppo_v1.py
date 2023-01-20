@@ -24,7 +24,7 @@ import sys
 import wandb
 
 # own implementations
-from ppo_torch.network import PolicyNet, ValueNet
+from network import PolicyNet, ValueNet
 
 # constants
 MODEL_PATH = './models/'
@@ -116,20 +116,7 @@ class PPO_PolicyGradient:
         action, log_prob, entropy = self.get_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
 
-    def cummulative_reward(self, batch_rewards):
-        """Calculate cummulative rewards with discount factor gamma."""
-        # Cumulative rewards: https://gongybable.medium.com/reinforcement-learning-introduction-609040c8be36
-        # advantage function: δt = G(t) + γV (st+1) − V (st)
-        # return value: G(t) = R(t) + gamma * R(t-1)
-        cum_rewards = []
-        for rewards in reversed(batch_rewards): # reversed order
-            discounted_reward = 0
-            for reward in reversed(rewards):
-                discounted_reward = reward + (self.gamma * discounted_reward)
-                cum_rewards.insert(0, discounted_reward)
-        return torch.tensor(cum_rewards, dtype=torch.float)
-
-    def generalized_advantage_estimate(self, batch_rewards, values, done, normalized=True):
+    def generalized_actor_critic_advantage(self, batch_rewards, values, done, normalized=True):
         """ Calculate advantage as a weighted average of A_t
             - advantage A_t gives information if this action is bettern than another at a state
             - done (Tensor): boolean flag for end of episode.
@@ -151,10 +138,19 @@ class PPO_PolicyGradient:
             advantages = self.normalize_adv(advantages)
         return advantages
 
-    def advantage_estimate(self, returns, values, normalized=True):
+    def actor_critic_advantage(self, rewards, values, normalized=True):
         """ Advantage calculation
             - advantage A_t gives information if this action is bettern than another at a state
         """
+        cum_rewards = []
+        # STEP 4: compute rewards to go
+        # discounted return: G(t) = R(t) + gamma * R(t-1)
+        for rewards in reversed(rewards): # reversed order
+            discounted_reward = 0
+            for reward in reversed(rewards):
+                discounted_reward = reward + (self.gamma * discounted_reward)
+                cum_rewards.insert(0, discounted_reward)
+        returns = torch.tensor(cum_rewards, dtype=torch.float)
         # STEP 5: compute advantage estimates A_t at step t
         advantages = returns - values
         if normalized:
@@ -226,10 +222,9 @@ class PPO_PolicyGradient:
         actions = torch.tensor(np.array(trajectory_actions), dtype=torch.float)
         log_probs = torch.tensor(np.array(trajectory_action_probs), dtype=torch.float)
         dones = torch.tensor(np.array(trajectory_dones), dtype=torch.float)
-        
+        returns = torch.tensor(np.array(batch_rewards), dtype=torch.float)
+
         # STEP 4: Calculate cummulated reward
-        cummulative_reward = self.cummulative_reward(batch_rewards)
-        cummulative_reward = torch.tensor(np.array(cummulative_reward), dtype=torch.float)
 
         # Calculate the stats
         cum_rews = [np.sum(ep_rews) for ep_rews in batch_rewards]
@@ -244,7 +239,7 @@ class PPO_PolicyGradient:
             "train/std episode returns": std_ep_rews,
         })
 
-        return obs, actions, log_probs, dones, cummulative_reward, batch_lens, mean_ep_rews
+        return obs, actions, log_probs, dones, returns, batch_lens, mean_ep_rews
                 
 
     def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
@@ -272,24 +267,24 @@ class PPO_PolicyGradient:
         
             # Collect trajectory
             # STEP 3-4: simulate and collect trajectories --> the following values are all per batch
-            obs, actions, log_probs, dones, cum_return, batch_lens, mean_reward = self.collect_rollout(n_step=self.trajectory_iterations)
+            obs, actions, log_probs, dones, returns, batch_lens, mean_ep_rews = self.collect_rollout(n_step=self.trajectory_iterations)
             
             # timesteps simulated so far for batch collection
             steps += np.sum(batch_lens)
 
             # STEP 5: compute advantage estimates A_t at timestep t_step
             values, _ , _ = self.get_values(obs, actions)
-            advantages = self.advantage_estimate(cum_return, values.detach())
-            # advantages = self.generalized_advantage_estimate(batch_rewards, values.detach(), dones)
+            advantages = self.actor_critic_advantage(returns, values.detach())
+            # advantages = self.generalized_actor_critic_advantage(batch_rewards, values.detach(), dones)
             # update network params 
             for _ in range(self.noptepochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs, _ = self.get_values(obs, actions)
-                policy_loss, value_loss = self.train(values, cum_return, advantages, log_probs, curr_log_probs, self.epsilon)
+                policy_loss, value_loss = self.train(values, returns, advantages, log_probs, curr_log_probs, self.epsilon)
 
             logging.info('\n')
             logging.info('###########################################')
-            logging.info(f"Mean return: {mean_reward}")
+            logging.info(f"Mean return: {mean_ep_rews}")
             logging.info(f"Policy loss: {policy_loss}")
             logging.info(f"Value loss:  {value_loss}")
             logging.info(f"Time step:   {steps}")
