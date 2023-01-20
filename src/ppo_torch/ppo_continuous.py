@@ -596,7 +596,7 @@ class PPO_PolicyGradient_V2:
         episode_lens = []
 
         # Run Monte Carlo simulation for n timesteps per batch
-        logging.info(f"Collecting trajectories in batch...")
+        logging.info(f"Collecting trajectories for {n_steps} episodes.")
         while t_step < n_steps:
             
             # rewards collected
@@ -702,6 +702,7 @@ class PPO_PolicyGradient_V2:
             advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
             # update network params 
+            logging.info(f"Updating network parameter for {self.n_optepochs} epochs.")
             for _ in range(self.n_optepochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs, _ = self.get_values(obs, actions)
@@ -835,12 +836,12 @@ class PPO_PolicyGradient_V2:
 
         logging.info('\n')
         logging.info(f'------------ Episode: {training_steps} --------------')
-        logging.info(f"Mean return:          {mean_ep_ret}")
-        logging.info(f"Min return:           {min_ep_ret}")
-        logging.info(f"Max return:           {max_ep_ret}")
+        logging.info(f"Max ep_return:        {max_ep_ret}")
+        logging.info(f"Min ep_return:        {min_ep_ret}")
+        logging.info(f"Mean ep_return:       {mean_ep_ret}")
         logging.info(f"Mean policy loss:     {mean_p_loss}")
         logging.info(f"Mean value loss:      {mean_v_loss}")
-        logging.info('-----------------------------------------------------')
+        logging.info('--------------------------------------------')
         logging.info('\n')
 
 ####################
