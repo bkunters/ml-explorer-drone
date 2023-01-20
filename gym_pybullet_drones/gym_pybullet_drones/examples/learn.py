@@ -19,6 +19,7 @@ It is not meant as a good/effective learning example.
 import time
 import argparse
 import gym
+from gym_pybullet_drones.envs.single_agent_rl.HoverAviary import HoverAviary
 import numpy as np
 from stable_baselines3 import A2C
 from stable_baselines3.a2c import MlpPolicy
@@ -34,27 +35,18 @@ from gym_pybullet_drones.utils.utils import sync, str2bool
 # import own modules
 import gym_pybullet_drones.examples.ppo as ppo
 
-DEFAULT_ENV = 'takeoff' #"takeoff", "hover", "flythrugate", "tune-aviary-v0"
+DEFAULT_ENV = 'takeoff' #"takeoff", "hover"
 DEFAULT_RLLIB = True
-DEFAULT_ALGO = 'PPOv2'
+DEFAULT_ALGO = 'ppo_v2'
 DEFAULT_GUI = True
 DEFAULT_USER_DEBUG_GUI = False
 DEFAULT_RECORD_VIDEO = True
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
-DEFAULT_SEED = 0
+DEFAULT_SEED = 42
 
-def make_env(env_id, seed=42, gym_wrappers=False):
+def make_env(env_id, seed=42):
     env = gym.make(env_id)
-
-        # gym wrapper
-    if gym_wrappers:
-        env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -1, 1))
-        env = gym.wrappers.NormalizeReward(env)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -1, 1))
-
     env.seed(seed)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
@@ -62,10 +54,9 @@ def make_env(env_id, seed=42, gym_wrappers=False):
 
 def run(env_id=DEFAULT_ENV, 
         rllib=DEFAULT_RLLIB, 
-        select_ppo=DEFAULT_ALGO, 
+        algo=DEFAULT_ALGO, 
         output_folder=DEFAULT_OUTPUT_FOLDER, 
-        gui=DEFAULT_GUI, 
-        user_debug_gui=DEFAULT_USER_DEBUG_GUI, 
+        gui=DEFAULT_GUI,
         plot=True, 
         colab=DEFAULT_COLAB, 
         record_video=DEFAULT_RECORD_VIDEO, 
@@ -77,24 +68,22 @@ def run(env_id=DEFAULT_ENV,
     if not env_id in ['takeoff', 'hover']: 
         print("[ERROR] 1D action space is only compatible with Takeoff and HoverAviary")
         exit()
-    env_id = env_id+"-aviary-v0"
+
+    env_id = env_id + "-aviary-v0"
     env = make_env(env_id, seed=seed)
     
     print("[INFO] Action space:", env.action_space)
     print("[INFO] Observation space:", env.observation_space)
     
-    check_env(env,
-              warn=True,
-              skip_render_check=True
-              )
+    check_env(env, warn=True, skip_render_check=True)
 
     print(env.action_space.sample())
 
-    #####################
+    ############################################################
     #### Train the model #######################################
-    #####################
+    ############################################################
 
-    if not rllib:
+    if algo == 'ppo_sb3':
         # stable baseline3
         model = A2C(MlpPolicy,
                     env,
@@ -102,7 +91,7 @@ def run(env_id=DEFAULT_ENV,
                     )
         model.learn(total_timesteps=10_000) # Typically not enough
     
-    elif select_ppo == 'PPOv2':
+    elif algo == 'ppo_v2':
         # custom ppo-v2
         # get PPOTrainer
         trainer = ppo.PPOTrainer(
@@ -117,7 +106,7 @@ def run(env_id=DEFAULT_ENV,
         # cleanup
         trainer.shutdown()
 
-    else:
+    elif algo == 'ppo_raylib':
         # use ray-lib ppo
         ray.shutdown()
         ray.init(ignore_reinit_error=True)
@@ -138,13 +127,18 @@ def run(env_id=DEFAULT_ENV,
         policy = agent.get_policy()
         ray.shutdown()
 
-    #####################
-    #### Show (and record a video of) the model's performance ####
-    #####################
+    ############################################################
+    #### Show (and record a video of) the model's performance ##
+    ############################################################
 
-    env = TakeoffAviary(gui=gui,
-                        record=record_video
-                        )
+    if env_id == 'takeoff':
+        env = TakeoffAviary(gui=gui,
+                            record=record_video
+                            )
+    elif env_id == 'hover':
+        env = HoverAviary(gui=gui,
+                            record=record_video
+                            )
     logger = Logger(logging_freq_hz=int(env.SIM_FREQ/env.AGGR_PHY_STEPS),
                     num_drones=1,
                     output_folder=output_folder,
@@ -179,6 +173,10 @@ def run(env_id=DEFAULT_ENV,
         logger.plot()
 
 
+#######################################
+#######################################
+
+
 if __name__ == "__main__":
     #### Define and parse (optional) arguments for the script ##
     parser = argparse.ArgumentParser(description='Single agent reinforcement learning example script using TakeoffAviary')
@@ -186,6 +184,8 @@ if __name__ == "__main__":
     parser.add_argument('--gui',                default=DEFAULT_GUI,            type=str2bool,      help='Whether to use PyBullet GUI (default: True)', metavar='')
     parser.add_argument('--record_video',       default=DEFAULT_RECORD_VIDEO,   type=str2bool,      help='Whether to record a video (default: False)', metavar='')
     parser.add_argument('--output_folder',      default=DEFAULT_OUTPUT_FOLDER,  type=str,           help='Folder where to save logs (default: "results")', metavar='')
+    parser.add_argument('--algo',               default=DEFAULT_ALGO,           type=str,           help='Select an algorithm to be used, either custom ppo or stable-baseline3 (ppo_v2, ppo_sb3)')
+    parser.add_argument('--env_id',             default=DEFAULT_ENV,            type=str,           help='Select an environment to train on (hover, takeoff)')
     parser.add_argument('--colab',              default=DEFAULT_COLAB,          type=bool,           help='Whether example is being run by a notebook (default: "False")', metavar='')
     ARGS = parser.parse_args()
 
