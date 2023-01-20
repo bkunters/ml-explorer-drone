@@ -512,9 +512,9 @@ class PPO_PolicyGradient:
     def finish_episode(self):
         pass
 
-    def collect_rollout(self, n_steps=1):
+    def collect_rollout(self, n_steps=2048):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)
-           # TODO: rollout length - 2048 t0 4096
+           A typical rollout length - 2048 t0 4096
         """
         
         t_step, rewards, frames = 0, [], deque(maxlen=24) # 4 fps - 6 sec
@@ -532,7 +532,7 @@ class PPO_PolicyGradient:
         episode_lens = []
 
         # Run Monte Carlo simulation for n timesteps per batch
-        logging.info(f"Collecting trajectories in batch...")
+        logging.info(f"Collecting trajectories...")
         while t_step < n_steps:
             
             # rewards collected
@@ -545,9 +545,9 @@ class PPO_PolicyGradient:
 
             # Run episode for a fixed amount of timesteps
             # to keep rollout size fixed and episodes independent
-            for t_batch in range(0, self.max_trajectory_size):
+            for t in range(0, self.max_trajectory_size):
                 # render gym envs
-                if self.render_video and t_batch % self.render_steps == 0:
+                if self.render_video and t % self.render_steps == 0:
                     frames.append(self.env.render(mode="rgb_array"))
                 
                 t_step += 1 
@@ -584,7 +584,7 @@ class PPO_PolicyGradient:
             time_elapsed = end_epoch - start_epoch
             episode_time.append(time_elapsed)
 
-            episode_lens.append(t_batch + 1) # as we started at 0
+            episode_lens.append(t + 1) # as we started at 0
             episode_rewards.append(rewards)
 
         # convert trajectories to torch tensors
@@ -599,7 +599,6 @@ class PPO_PolicyGradient:
 
     def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
         """Calculate loss and update weights of both networks."""
-        logging.info("Updating network parameter...")
         # loss of the policy network
         self.policy_net_optim.zero_grad()  # reset optimizer
         policy_loss = self.policy_net.loss(
@@ -639,6 +638,7 @@ class PPO_PolicyGradient:
             advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             
             # update network params 
+            logging.info("Updating network parameter...")
             for _ in range(self.n_optepochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs, _ = self.get_values(obs, actions)
@@ -694,11 +694,18 @@ class PPO_PolicyGradient:
 
         # Finalize and plot stats
         if self.stats_plotter:
-            df = self.stats_plotter.read_csv() # read all files in folder
-            self.stats_plotter.plot_seaborn_fill(df, x='timestep', y='mean episodic returns', 
-                                                y_min='min episodic returns', y_max='max episodic returns',  
-                                                title=f'{env_name}', x_label='Timestep', y_label='Mean Episodic Return', 
-                                                color='blue', smoothing=6, wandb=wandb, xlim_up=self.total_training_steps)
+            try: 
+                df = self.stats_plotter.read_csv() # read all files in folder
+                self.stats_plotter.plot_seaborn_fill(df, 
+                                                    x='timestep', y='mean episodic returns', 
+                                                    y_min='min episodic returns', y_max='max episodic returns',  
+                                                    title=f'{env_name}', 
+                                                    x_label='Episode', 
+                                                    y_label='Mean Episodic Return',
+                                                    smoothing=2, 
+                                                    wandb=wandb)
+            except:
+                logging.warn('Plotting unsuccessful...')
         if wandb:
             # save files in path
             wandb.save(os.path.join(self.exp_path, "*csv"))
@@ -753,8 +760,8 @@ class PPO_PolicyGradient:
         self.stats_data['mean episodic returns'].append(mean_ep_ret)
         self.stats_data['min episodic returns'].append(min_ep_ret)
         self.stats_data['max episodic returns'].append(max_ep_ret)
-        self.stats_data['mean episodic runtime'].append(mean_ep_time)
         self.stats_data['std episodic returns'].append(std_ep_rew)
+        self.stats_data['mean episodic runtime'].append(mean_ep_time)
         self.stats_data['eval episodes'].append(len(cum_ret))
         self.stats_data['timestep'].append(training_steps)
 
@@ -790,25 +797,24 @@ def arg_parser():
     parser = argparse.ArgumentParser()
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, capture video of run")
-    parser.add_argument("--train", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, run model in training mode")
-    parser.add_argument("--test", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, run model in testing mode")
-    parser.add_argument("--hyperparam", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, log hyperparameters")
-    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"), help="the name of this experiment")
-    parser.add_argument("--project-name", type=str, default='OpenAIGym-PPO', help="the name of this project") 
-    parser.add_argument("--gym-id", type=str, default="Pendulum-v1", help="the id of the gym environment")
-    parser.add_argument("--learning-rate", type=float, default=3e-4, help="the learning rate of the optimizer")
-    parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
+    parser.add_argument("--video",          type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, capture video of run")
+    parser.add_argument("--train",          type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, run model in training mode")
+    parser.add_argument("--test",           type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, run model in testing mode")
+    parser.add_argument("--hyperparam",     type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, log hyperparameters")
+    parser.add_argument("--exp-name",       type=str, default=os.path.basename(__file__).rstrip(".py"), help="the name of this experiment")
+    parser.add_argument("--project-name",   type=str, default='OpenAIGym-PPO', help="the name of this project") 
+    parser.add_argument("--gym-id",         type=str, default="Pendulum-v1", help="the id of the gym environment")
+    parser.add_argument("--learning-rate",  type=float, default=3e-4, help="the learning rate of the optimizer")
+    parser.add_argument("--seed",           type=int, default=1, help="seed of the experiment")
     parser.add_argument("--total-timesteps", type=int, default=2000000, help="total timesteps of the experiments")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
+    parser.add_argument("--cuda",           type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
 
     # Parse arguments if they are given
     args = parser.parse_args()
     return args
 
 def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=42):
-    print(f"##### making GYM with {env_id}")
     env = gym.make(env_id)
     # gym wrapper
     if gym_wrappers:
@@ -1034,7 +1040,24 @@ class PPOTrainer:
                 normalize_adv=self.normalize_advantage,
                 normalize_ret=self.normalize_return)
         return agent
-    
+
+    def shutdown(self):
+        # cleanup 
+        self.env.close()
+        wandb.run.finish() if wandb and wandb.run else None
+
+    def get_policy(self):
+        checkpoints = os.path.join(self.model_dir, f'{self.env_name}_policyNet.pth')
+        policy_net = PolicyNet(self.obs_dim, self.act_dim)
+        policy_net = load_model(checkpoints, policy_net, self.device)
+        return policy_net
+
+
+class PPOTuner:
+    """ Class to tune PPO hyperparameter """
+    def __init__(self) -> None:
+        pass
+
     def hyperparam_tuning(self):
         # TODO
         param_dict = {
@@ -1047,14 +1070,3 @@ class PPOTrainer:
                 'number of epochs for update': [8, 16, 32, 64, 128, 256],
                 'max sampled trajectories': [32, 64, 128, 256, 512, 1024, 2048, 4096]
         }
-
-    def shutdown(self):
-        # cleanup 
-        # self.env.close()
-        wandb.run.finish() if wandb and wandb.run else None
-
-    def get_policy(self):
-        checkpoints = os.path.join(self.model_dir, f'{self.env_name}_policyNet.pth')
-        policy_net = PolicyNet(self.obs_dim, self.act_dim)
-        policy_net = load_model(checkpoints, policy_net, self.device)
-        return policy_net
