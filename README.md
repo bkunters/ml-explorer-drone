@@ -4,10 +4,12 @@ This repository contains a UnityML drone environment and the PyBullet Drone envi
 
 ### Top level directory layout
 .
+├── docs                                # Documentation files, papers
+├── imgs                                # Image files for README.md
 ├── gym_pybullet_drones                 # PyBullet drone environment
 ├── ml_explorer_drones                  # UnityML explorer environment (for further development)
 ├── src                                 # Source files 
-├── results                             # Results including models, logs, plots
+├── results                             # Results including our best pre-trained models, log-files (.csv), plots (.png), videos (.gif/.mp4)
 ├── tools                               # Tools and utilities
 ├── requirements.txt                    # requirements.txt for pybullet and ppo_v2
 ├── LICENSE
