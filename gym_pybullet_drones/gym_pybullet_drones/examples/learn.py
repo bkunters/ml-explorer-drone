@@ -16,27 +16,31 @@ reinforcement learning libraries `stable-baselines3` and `ray[rllib]`.
 It is not meant as a good/effective learning example.
 
 """
+import os
 import time
+from datetime import datetime
 import argparse
+import numpy as np
+
 import gym
 from gym_pybullet_drones.envs.single_agent_rl.FlyThruGateAviary import FlyThruGateAviary
 from gym_pybullet_drones.envs.single_agent_rl.HoverAviary import HoverAviary
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
-import numpy as np
+
 from stable_baselines3 import A2C
 from stable_baselines3.a2c import MlpPolicy
 from stable_baselines3.common.env_checker import check_env
 import ray
 from ray.tune import register_env
-# from ray.rllib.agents import ppo
+from ray.rllib.agents import ppo as rrlib_ppo
+import wandb
 
 from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.envs.single_agent_rl.TakeoffAviary import TakeoffAviary
 from gym_pybullet_drones.utils.utils import sync, str2bool
 
 # import own modules
-import gym_pybullet_drones.examples.ppo as ppo
-from gym_pybullet_drones.examples.ppo import PPOTrainer
+from gym_pybullet_drones.examples import ppo as ppo_v2
 
 #######################################
 #######################################
@@ -62,6 +66,10 @@ DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
 DEFAULT_SEED = 42
 DEFAULT_TRAINING_STEPS = 100_000 # just for testing, too short otherwise
+
+# get current date and time
+CURR_DATE = datetime.today().strftime('%Y-%m-%d')
+CURR_TIME = datetime.now().strftime("%Y%m%d-%H%M%S")
 
 #######################################
 #######################################
@@ -96,7 +104,9 @@ def run(env_id=DEFAULT_ENV,
     INIT_RPYS = np.array([[0, 0,  i * (np.pi/2)/num_drones] for i in range(num_drones)])
     AGGR_PHY_STEPS = int(simulation_freq_hz/control_freq_hz) if aggregate else 1
 
-
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder+'/')
+        
     #############################################################
     #### Check the environment's spaces ########################
     #############################################################
@@ -117,33 +127,52 @@ def run(env_id=DEFAULT_ENV,
 
     print(env.action_space.sample())
 
+    exp_name = f"exp_name: {env_id}_{algo}_{CURR_DATE}"
     ############################################################
     #### Train the model #######################################
     ############################################################
 
     if algo == 'ppo_sb3':
+
+        if wandb:
+            wandb.init(
+                project='PyBulletGym-Drone',
+                entity='drone-mechanics',
+                sync_tensorboard=True,
+                config={ # stores hyperparams in job
+                        'env name': env_id,
+                        'env number': 1, # only single env
+                        'experiment name': exp_name
+                    },
+                    dir=os.getcwd(),
+                    name=exp_name,
+                    monitor_gym=True,
+                    save_code=True)
+
         # stable baseline3
         model = A2C(MlpPolicy,
                     env,
                     verbose=1
                     )
-        model.learn(total_timesteps=train_steps)
-    
+        model.learn(total_timesteps=train_steps, wandb=wandb)
+
     elif algo == 'ppo_v2':
         # custom ppo-v2
-        # create PPOTrainer
-        trainer = PPOTrainer(
-                    env, 
-                    total_training_steps=train_steps, # shorter just for testing
-                    n_optepochs=64,
-                    epsilon=0.22,
-                    gae_lambda=0.95,
-                    gamma=0.99,
-                    adam_eps=1e-7,
-                    seed=seed) 
+        trainer = ppo_v2.PPOTrainer(
+                            env, 
+                            total_training_steps=train_steps, # shorter just for testing
+                            n_optepochs=64,
+                            epsilon=0.22,
+                            gae_lambda=0.95,
+                            gamma=0.99,
+                            adam_eps=1e-7,
+                            seed=seed,
+                            exp_name=exp_name
+                        ) 
         # train PPO
         agent = trainer.create_ppo()
         agent.learn()
+
         # get trained policy
         policy = trainer.get_policy()
         # cleanup
@@ -153,30 +182,60 @@ def run(env_id=DEFAULT_ENV,
         # use ray-lib ppo
         ray.shutdown()
         ray.init(ignore_reinit_error=True)
+
+        if wandb:
+            wandb.init(
+                project='PyBulletGym-Drone',
+                entity='drone-mechanics',
+                sync_tensorboard=True,
+                config={ # stores hyperparams in job
+                        'env name': env_id,
+                        'env number': 1, # only single env
+                        'experiment name': exp_name
+                    },
+                    dir=os.getcwd(),
+                    name=exp_name,
+                    monitor_gym=True,
+                    save_code=True)
+
         register_env(env_id, lambda _: TakeoffAviary())
-        config = ppo.DEFAULT_CONFIG.copy()
+        config = rrlib_ppo.DEFAULT_CONFIG.copy()
         config["num_workers"] = 2
         config["framework"] = "torch"
         config["env"] = env_id
-        agent = ppo.PPOTrainer(config)
-        for i in range(3): # Typically not enough
+        agent = rrlib_ppo.PPOTrainer(config)
+
+
+        for i in range(train_steps):
             results = agent.train()
-            print("[INFO] {:d}: episode_reward max {:f} min {:f} mean {:f}".format(i,
-                    results["episode_reward_max"],
-                    results["episode_reward_min"],
-                    results["episode_reward_mean"])
-                )
+
+            ep_min_rew = results["episode_reward_min"]
+            ep_max_rew = results["episode_reward_max"]
+            ep_mean_rew = results["episode_reward_mean"]
+
+            if wandb:
+                wandb.log({
+                    'train/mean episode returns': ep_mean_rew,
+                    'train/min episode returns': ep_min_rew,
+                    'train/max episode returns': ep_max_rew,
+                })
+
+            print("[INFO] {:d}: episode_reward max {:f} min {:f} mean {:f}".format(i, 
+                ep_max_rew,
+                ep_min_rew,
+                ep_mean_rew)
+            )
         policy = agent.get_policy()
         ray.shutdown()
-
+    
+    else:
+        AssertionError("No algorithm selected.")
     ############################################################
     #### Show (and record a video of) the model's performance ##
     ############################################################
 
     if env_id == 'takeoff':
         env = TakeoffAviary(drone_model=drone,
-                            initial_xyzs=INIT_XYZS,
-                            initial_rpys=INIT_RPYS,
                             freq=simulation_freq_hz,
                             aggregate_phy_steps=AGGR_PHY_STEPS,
                             gui=gui,
@@ -185,24 +244,20 @@ def run(env_id=DEFAULT_ENV,
                         )
     elif env_id == 'hover':
         env = HoverAviary(drone_model=drone,
-                            initial_xyzs=INIT_XYZS,
-                            initial_rpys=INIT_RPYS,
-                            freq=simulation_freq_hz,
-                            aggregate_phy_steps=AGGR_PHY_STEPS,
-                            gui=gui,
-                            physics=physics,
-                            record=record_video
+                          freq=simulation_freq_hz,
+                          aggregate_phy_steps=AGGR_PHY_STEPS,
+                          gui=gui,
+                          physics=physics,
+                          record=record_video
                         )
     elif env_id == 'flythrugate':
         env = FlyThruGateAviary(drone_model=drone,
-                            initial_xyzs=INIT_XYZS,
-                            initial_rpys=INIT_RPYS,
-                            freq=simulation_freq_hz,
-                            aggregate_phy_steps=AGGR_PHY_STEPS,
-                            gui=gui,
-                            physics=physics,
-                            record=record_video
-                        )
+                                freq=simulation_freq_hz,
+                                aggregate_phy_steps=AGGR_PHY_STEPS,
+                                gui=gui,
+                                physics=physics,
+                                record=record_video
+                            )
     logger = Logger(logging_freq_hz=int(env.SIM_FREQ/env.AGGR_PHY_STEPS),
                     num_drones=num_drones,
                     output_folder=output_folder,
@@ -213,7 +268,7 @@ def run(env_id=DEFAULT_ENV,
     for i in range(30000*env.SIM_FREQ):
         
         # query policy for action
-        if not rllib and algo == 'ppo_sb3':
+        if algo == 'ppo_sb3':
             action, _states = model.predict(obs, deterministic=True)
         elif algo == 'ppo_v2':
             action = policy(obs).detach().numpy()
@@ -239,6 +294,11 @@ def run(env_id=DEFAULT_ENV,
         if gui:
             sync(i, start, env.TIMESTEP)
         
+        if wandb:
+            wandb.log({
+                    'test/episode returns': reward
+                })
+
         if done:
             obs = env.reset()
     
@@ -264,12 +324,8 @@ def make_env(env_id, seed=42):
     env.observation_space.seed(seed)
     return env
 
-#######################################
-#######################################
-
-
-if __name__ == "__main__":
-    #### Define and parse (optional) arguments for the script ##
+def arg_parser():
+    """Define and parse (optional) arguments for the script"""
     parser = argparse.ArgumentParser(description='Single agent reinforcement learning example script using TakeoffAviary or HoverAviary')
     parser.add_argument('--rllib',              default=DEFAULT_RLLIB,              type=str2bool,       help='Whether to use RLlib PPO in place of stable-baselines A2C (default: False)', metavar='')
     parser.add_argument('--gui',                default=DEFAULT_GUI,                type=str2bool,       help='Whether to use PyBullet GUI (default: True)', metavar='')
@@ -279,6 +335,21 @@ if __name__ == "__main__":
     parser.add_argument('--env_id',             default=DEFAULT_ENV,                type=str,            help='Select an environment to train on (hover, takeoff, flythrugate)')
     parser.add_argument('--train_steps',        default=DEFAULT_TRAINING_STEPS,     type=int,            help='Select the amount of training steps')
     parser.add_argument('--colab',              default=DEFAULT_COLAB,              type=bool,           help='Whether example is being run by a notebook (default: "False")', metavar='')
-    ARGS = parser.parse_args()
+
+    # Parse arguments if they are given
+    args = parser.parse_args()
+    return args
+
+#######################################
+#######################################
+
+
+if __name__ == "__main__":
+    """ Pybullet drone gym environments 
+        Find docu: https://github.com/utiasDSL/gym-pybullet-drones
+    """
+
+    #### Define and parse (optional) arguments for the script ##
+    ARGS = arg_parser()
 
     run(**vars(ARGS))

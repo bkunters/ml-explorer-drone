@@ -185,6 +185,7 @@ class PPO_PolicyGradient:
 
         # environment
         self.env = env
+        self.env_name = self.env.unwrapped.spec.id
 
         # hyperparams
         self.in_dim = in_dim
@@ -530,6 +531,12 @@ class PPO_PolicyGradient:
         episode_dones = []
         episode_rewards = []
         episode_lens = []
+        episode_info = {
+            "dist_to_gate": [],
+            "dist_to_origin": [],
+            "z_velocity": [],
+            "y_position": []
+        }
 
         # Run Monte Carlo simulation for n timesteps per batch
         logging.info(f"Collecting trajectories for {n_steps} episodes.")
@@ -561,7 +568,7 @@ class PPO_PolicyGradient:
                         
                 # STEP 3: collecting set of trajectories D_k by running action 
                 # that was sampled from policy in environment
-                __obs, reward, done, truncated = self.env.step(action)
+                __obs, reward, done, info = self.env.step(action)
                 
                 # collection of trajectories in batches
                 episode_obs.append(obs)
@@ -570,11 +577,20 @@ class PPO_PolicyGradient:
                 episode_action_probs.append(log_probability)
                 rewards.append(reward)
                 episode_dones.append(done)
-                    
+
+                try: 
+                    episode_info["dist_to_gate"].append(info["dist_to_gate"]) # collect info objects
+                    episode_info["dist_to_origin"].append(info["dist_to_origin"])
+                    episode_info["z_velocity"].append(info["z_velocity"])
+                    episode_info["y_position"].append(info["y_position"])
+                except:
+                    logging.warn("Failed to collect info object.")
+                
+                
                 obs = __obs
 
                 # break out of loop if episode is terminated
-                if done or truncated:
+                if done:
                     break
             
             # stop time per episode
@@ -594,7 +610,7 @@ class PPO_PolicyGradient:
         action_log_probs = torch.tensor(np.array(episode_action_probs), device=self.device, dtype=torch.float)
         dones = torch.tensor(np.array(episode_dones), device=self.device, dtype=torch.float)
 
-        return obs, next_obs, actions, action_log_probs, dones, episode_rewards, episode_lens, np.array(episode_time), frames
+        return obs, next_obs, actions, action_log_probs, dones, episode_rewards, episode_lens, np.array(episode_time), episode_info, frames
                 
 
     def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
@@ -616,6 +632,8 @@ class PPO_PolicyGradient:
 
     def learn(self):
         """"""
+        self.start_time = time.time()
+        # start training loop
         training_steps = 0
         done_so_far = 0
         while training_steps < self.total_training_steps:
@@ -624,7 +642,7 @@ class PPO_PolicyGradient:
             # Collect data over one episode
             # Episode = recording of actions and states that an agent performed from a start state to an end state
             # STEP 3: simulate and collect trajectories --> the following values are all per batch over one episode
-            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time, frames = self.collect_rollout(n_steps=self.n_rollout_steps)
+            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time, ep_info, frames = self.collect_rollout(n_steps=self.n_rollout_steps)
 
             # experiences simulated so far
             training_steps += np.sum(ep_lens)
@@ -648,17 +666,16 @@ class PPO_PolicyGradient:
                 value_losses.append(value_loss.detach().numpy())
 
             # log all statistical values to CSV
-            self.log_stats(policy_losses, value_losses, rewards, ep_lens, training_steps, ep_time, done_so_far, exp_name=self.exp_name)
+            self.log_stats(policy_losses, value_losses, rewards, ep_lens, training_steps, ep_time, done_so_far, ep_info, exp_name=self.exp_name)
 
             # increment for each iteration
             done_so_far += 1
 
             # store model with checkpoints
             if training_steps % self.save_model == 0:
-                env_name = self.env.unwrapped.spec.id
                 env_model_path = os.path.join(self.exp_path, 'models')
-                policy_net_name = os.path.join(env_model_path, f'{env_name}_policyNet.pth')
-                value_net_name = os.path.join(env_model_path, f'{env_name}_valueNet.pth')
+                policy_net_name = os.path.join(env_model_path, f'{self.env_name}_policyNet.pth')
+                value_net_name = os.path.join(env_model_path, f'{self.env_name}_valueNet.pth')
                 torch.save({
                     'epoch': training_steps,
                     'model_state_dict': self.policy_net.state_dict(),
@@ -700,7 +717,7 @@ class PPO_PolicyGradient:
                 self.stats_plotter.plot_seaborn_fill(df, 
                                                     x='timestep', y='mean episodic returns', 
                                                     y_min='min episodic returns', y_max='max episodic returns',  
-                                                    title=f'{env_name}', 
+                                                    title=f'{self.env_name}', 
                                                     x_label='Episode', 
                                                     y_label='Mean Episodic Return',
                                                     smoothing=2, 
@@ -731,10 +748,27 @@ class PPO_PolicyGradient:
         anim.save(video_path, writer='imagemagick', fps=60)
 
 
-    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, done_so_far, exp_name='experiment', smoothing=None):
+    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, done_so_far, ep_info, exp_name='experiment', smoothing=None):
         """Calculate stats and log to W&B, CSV, logger """
+        mean_ep_drone_dist_gate, mean_ep_drone_dist_origin, mean_ep_drone_y_velocity, mean_ep_drone_y_pos = 0., 0., 0., 0.
+        time_elapsed = int(time.time() - self.start_time)
+        
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
+
+        # drone dist to origin
+        try: 
+            mean_ep_dist_gate = np.array(ep_info["dist_to_gate"].values())
+            mean_ep_dist_origin = np.array(ep_info["dist_to_origin"].values())
+            mean_ep_yvelocity = np.array(ep_info["z_velocity"].values())
+            mean_ep_ypos = np.array(ep_info["y_position"].values())
+
+            mean_ep_drone_dist_gate = round(np.mean(mean_ep_dist_gate), 6)
+            mean_ep_drone_dist_origin = round(np.mean(mean_ep_dist_origin), 6)
+            mean_ep_drone_y_velocity = round(np.mean(mean_ep_yvelocity), 6)
+            mean_ep_drone_y_pos = round(np.mean(mean_ep_ypos), 6)
+        except:
+            logging.warn("Couldn't get drone info values.")
         # calculate stats
         mean_p_loss = round(np.mean([np.sum(loss) for loss in p_losses]), 6)
         mean_v_loss = round(np.mean([np.sum(loss) for loss in v_losses]), 6)
@@ -779,6 +813,12 @@ class PPO_PolicyGradient:
                 'train/mean episode runtime': mean_ep_time,
                 'train/mean episode length': mean_ep_len,
                 'train/episodes': done_so_far,
+                'train/time elapsed': time_elapsed,
+                # drone info TODO: Fix mean for position
+                'train/drone dist to origin': mean_ep_drone_dist_origin,
+                'train/drone dist to gate': mean_ep_drone_dist_gate,
+                'train/drone y_position': mean_ep_drone_y_pos,
+                'train/drone y_velocity': mean_ep_drone_y_velocity,
             })
 
         logging.info('\n')
@@ -891,6 +931,7 @@ class PPOTrainer:
                 normalize_ret=True,
                 deterministic=True, 
                 seed=42, 
+                exp_name=None,
                 project_name='PyBulletGym-Drone') -> None:
 
         self.env = env
@@ -914,7 +955,7 @@ class PPOTrainer:
         self.normalize_return = normalize_ret
         
         # experiment
-        self.exp_name = f"exp_name: {self.env_name}_{CURR_DATE}"
+        self.exp_name = f"exp_name: {self.env_name}_{CURR_DATE}" if not exp_name else exp_name
 
         # logging
         self.project_name = project_name
