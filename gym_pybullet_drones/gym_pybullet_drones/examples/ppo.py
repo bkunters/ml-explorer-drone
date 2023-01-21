@@ -686,11 +686,12 @@ class PPO_PolicyGradient:
                 if self.render_video and done_so_far % self.video_log_steps == 0:
                     filename='pendulum_v1.gif'
                     self.save_frames_as_gif(frames, self.exp_path, filename)
-                    wandb.log({
-                        "train/video": wandb.Video(os.path.join(self.exp_path, filename), 
-                        caption='episode: '+str(done_so_far), 
-                        fps=4, format="gif"), "step": done_so_far
-                        })
+                    if wandb:
+                        wandb.log({
+                            "train/video": wandb.Video(os.path.join(self.exp_path, filename), 
+                            caption='episode: '+str(done_so_far), 
+                            fps=4, format="gif"), "step": done_so_far
+                            })
 
         # Finalize and plot stats
         if self.stats_plotter:
@@ -705,7 +706,7 @@ class PPO_PolicyGradient:
                                                     smoothing=2, 
                                                     wandb=wandb)
             except:
-                logging.warn('Plotting unsuccessful...')
+                logging.warn('Plotting unsuccessfull...')
         if wandb:
             # save files in path
             wandb.save(os.path.join(self.exp_path, "*csv"))
@@ -766,18 +767,19 @@ class PPO_PolicyGradient:
         self.stats_data['timestep'].append(training_steps)
 
         # Monitoring via W&B
-        wandb.log({
-            'train/timesteps': training_steps,
-            'train/mean policy loss': mean_p_loss,
-            'train/mean value loss': mean_v_loss,
-            'train/mean episode returns': mean_ep_ret,
-            'train/min episode returns': min_ep_ret,
-            'train/max episode returns': max_ep_ret,
-            'train/std episode returns': std_ep_rew,
-            'train/mean episode runtime': mean_ep_time,
-            'train/mean episode length': mean_ep_len,
-            'train/episodes': done_so_far,
-        })
+        if wandb:
+            wandb.log({
+                'train/timesteps': training_steps,
+                'train/mean policy loss': mean_p_loss,
+                'train/mean value loss': mean_v_loss,
+                'train/mean episode returns': mean_ep_ret,
+                'train/min episode returns': min_ep_ret,
+                'train/max episode returns': max_ep_ret,
+                'train/std episode returns': std_ep_rew,
+                'train/mean episode runtime': mean_ep_time,
+                'train/mean episode length': mean_ep_len,
+                'train/episodes': done_so_far,
+            })
 
         logging.info('\n')
         logging.info(f'------------ Episode: {training_steps} --------------')
@@ -973,41 +975,41 @@ class PPOTrainer:
         self.stats_plotter = StatsPlotter(self.exp_dir, file_name_and_path=png_file)
 
     def setup_wb(self):
-
-        wandb.init(
-            project=self.project_name,
-            entity='drone-mechanics',
-            sync_tensorboard=True,
-            config={ # stores hyperparams in job
-                    'env name': self.env_name,
-                    'env number': 1, # only single env
-                    'total_training_steps': self.total_training_steps,
-                    'max sampled trajectories': self.max_trajectory_size,
-                    'batches per episode': self.n_rollout_steps,
-                    'number of epochs for update': self.n_optepochs,
-                    'input layer size': self.obs_dim,
-                    'output layer size': self.act_dim,
-                    'observation space': self.obs_shape,
-                    'action space': self.act_shape,
-                    'action space upper bound': self.upper_bound,
-                    'action space lower bound': self.lower_bound,
-                    'learning rate (policy net)': self.learning_rate_p,
-                    'learning rate (value net)': self.learning_rate_v,
-                    'epsilon (adam optimizer)': self.adam_eps,
-                    'gamma (discount)': self.gamma,
-                    'epsilon (clip_range)': self.epsilon,
-                    'gae lambda (GAE)': self.gae_lambda,
-                    'normalize advantage': self.normalize_advantage,
-                    'normalize return': self.normalize_return,
-                    'seed': self.seed,
-                    'experiment path': self.exp_dir,
-                    'experiment name': self.exp_name
-                },
-                dir=os.getcwd(),
-                name=self.exp_name,
-                monitor_gym=True,
-                save_code=True
-            )
+        if wandb:
+            wandb.init(
+                project=self.project_name,
+                entity='drone-mechanics',
+                sync_tensorboard=True,
+                config={ # stores hyperparams in job
+                        'env name': self.env_name,
+                        'env number': 1, # only single env
+                        'total_training_steps': self.total_training_steps,
+                        'max sampled trajectories': self.max_trajectory_size,
+                        'batches per episode': self.n_rollout_steps,
+                        'number of epochs for update': self.n_optepochs,
+                        'input layer size': self.obs_dim,
+                        'output layer size': self.act_dim,
+                        'observation space': self.obs_shape,
+                        'action space': self.act_shape,
+                        'action space upper bound': self.upper_bound,
+                        'action space lower bound': self.lower_bound,
+                        'learning rate (policy net)': self.learning_rate_p,
+                        'learning rate (value net)': self.learning_rate_v,
+                        'epsilon (adam optimizer)': self.adam_eps,
+                        'gamma (discount)': self.gamma,
+                        'epsilon (clip_range)': self.epsilon,
+                        'gae lambda (GAE)': self.gae_lambda,
+                        'normalize advantage': self.normalize_advantage,
+                        'normalize return': self.normalize_return,
+                        'seed': self.seed,
+                        'experiment path': self.exp_dir,
+                        'experiment name': self.exp_name
+                    },
+                    dir=os.getcwd(),
+                    name=self.exp_name,
+                    monitor_gym=True,
+                    save_code=True
+                )
 
     def create_ppo(self):
         agent = PPO_PolicyGradient(
@@ -1070,3 +1072,4 @@ class PPOTuner:
                 'number of epochs for update': [8, 16, 32, 64, 128, 256],
                 'max sampled trajectories': [32, 64, 128, 256, 512, 1024, 2048, 4096]
         }
+

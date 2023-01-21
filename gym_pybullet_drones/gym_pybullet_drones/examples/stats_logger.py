@@ -121,6 +121,7 @@ class StatsPlotter:
 
         # plot the file to given destination
         ax.figure.savefig(self.file_name_and_path)
+        
         # show for 3 sec
         plt.show(block=False)
         plt.pause(3)
