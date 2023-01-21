@@ -134,7 +134,21 @@ class FlyThruGateAviary(BaseSingleAgentAviary):
             Dummy value.
 
         """
-        return {"answer": 42} #### Calculated by the Deep Thought supercomputer in 7.5M years
+        state = self._getDroneStateVector(0)
+        
+        # current position
+        y_position = state[9]
+        y_veloctiy = state[12]
+        
+        # Euclidean distance
+        dist_to_origin = np.linalg.norm(np.array([0, 0, 1]) - state[0:3])**2 ### squared Euclidean distance to origin
+        dist_to_gate = np.linalg.norm(np.array([0, -1, .55]) - state[0:3])**2 ### squared Euclidean distance to gate
+        return {
+                "dist_to_gate": dist_to_gate,
+                "dist_to_origin": dist_to_origin,
+                "z_velocity": y_veloctiy,
+                "y_position": y_position
+            } 
 
     ################################################################################
     

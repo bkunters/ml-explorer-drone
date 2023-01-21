@@ -66,14 +66,14 @@ Select a training from scratch with optional flags (--algo, --train_steps, --env
 [2] Training
 
 Run training with PPO
-- ```python ppo_continuous.py --train True```
+- ```python ppo_continuous.py --run_train True```
 
 [3] Evaluation
-- ```python ppo_continuous.py --test True```
+- ```python ppo_continuous.py --run_test True```
 
 [3] Hyperparameter Tuning
 Run training with PPO
-- ```python ppo_continuous.py --hyperparam True```
+- ```python ppo_continuous.py --run_hyperparam True```
 
 ## 4. Logging
 All training results are logged under W&B and ```./log``` in the respective directory.

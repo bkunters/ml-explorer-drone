@@ -3,6 +3,7 @@ from datetime import datetime
 from cycler import cycler
 import numpy as np
 import matplotlib.pyplot as plt
+import wandb
 
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
@@ -123,7 +124,8 @@ class Logger(object):
     def save(self):
         """Save the logs to file.
         """
-        with open(os.path.join(self.OUTPUT_FOLDER, "save-flight-"+datetime.now().strftime("%m.%d.%Y_%H.%M.%S")+".npy"), 'wb') as out_file:
+        file_name = os.path.join(self.OUTPUT_FOLDER, "save-flight-"+datetime.now().strftime("%m.%d.%Y_%H.%M.%S")+".npy")
+        with open(file_name, 'wb') as out_file:
             np.savez(out_file, timestamps=self.timestamps, states=self.states, controls=self.controls)
 
     ################################################################################
@@ -211,6 +213,7 @@ class Logger(object):
             If True, converts logged RPM into PWM values (for Crazyflies).
 
         """
+        img_name = os.path.join(self.OUTPUT_FOLDER, "save-flight-"+datetime.now().strftime("%m.%d.%Y_%H.%M.%S")+".png")
         #### Loop over colors and line styles ######################
         plt.rc('axes', prop_cycle=(cycler('color', ['r', 'g', 'b', 'y']) + cycler('linestyle', ['-', '--', ':', '-.'])))
         fig, axs = plt.subplots(10, 2)
@@ -376,4 +379,12 @@ class Logger(object):
         if self.COLAB: 
             plt.savefig(os.path.join('results', 'output_figure.png'))
         else:
+            plt.savefig(img_name)
             plt.show()
+        
+        if wandb:
+            try:
+                images = wandb.Image(plt)
+                wandb.log({'Mean Episodic Return': images})
+            except:
+                print("[Error]: Could not save img.")

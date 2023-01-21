@@ -31,13 +31,16 @@ Packages/manifest.json
 /[Uu]ser[Ss]ettings/
 Assets/ML-Agents/Timers.meta
 Assets/ML-Agents/Timers/
+ml_explorer_drones/Library/*
+ml_explorer_drones/Temp/*
+ml_explorer_drones/Build/*
+ml_explorer_drones/Logs/*
 
 # Unity3D generated file on crash reports
 sysinfo.txt
 
 # Monitoring
 */wandb/*
-PPO/ppo_torch/wandb/
 
 # Checkpoints
 # IPython notebook checkpoints
