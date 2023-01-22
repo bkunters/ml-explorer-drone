@@ -98,7 +98,7 @@ class PolicyNet(Net):
         out = self.layer3(x)  # head has linear activation (continuous space)
         return out
 
-    def loss(self, advantages, batch_log_probs, curr_log_probs, clip_eps=0.2):
+    def loss(self, advantages, log_probs, curr_log_probs, clip_eps=0.2):
         """ Make the clipped surrogate objective function to compute policy loss.
                 - The ratio is clipped to be close to 1. 
                 - The clipping ensures that the update will not be too large so that training is more stable.
@@ -106,7 +106,7 @@ class PolicyNet(Net):
                   if the ratio is not between 1-ϵ and 1+ϵ.
         """
         # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
-        ratio = torch.exp(curr_log_probs - batch_log_probs)
+        ratio = torch.exp(curr_log_probs - log_probs)
         clip_1 = ratio * advantages
         clip_2 = torch.clamp(ratio, 1.0 - clip_eps,
                              1.0 + clip_eps) * advantages
@@ -518,7 +518,7 @@ class PPO_PolicyGradient:
            A typical rollout length - 2048 t0 4096
         """
         
-        t_step, rewards, frames = 0, [], deque(maxlen=24) # 4 fps - 6 sec
+        t_step, rewards, frames = 0, [], deque(maxlen=24)  # 4 fps - 6 sec
 
         # log time
         episode_time = []
@@ -541,35 +541,35 @@ class PPO_PolicyGradient:
         # Run Monte Carlo simulation for n timesteps per batch
         logging.info(f"Collecting trajectories for {n_steps} episodes.")
         while t_step < n_steps:
-            
+
             # rewards collected
             rewards, done, frames = [], False, []
             obs = self.env.reset()
 
             # measure time elapsed for one episode
             # torch.cuda.synchronize()
-            start_epoch = time.time()
+            start_time = time.time()
 
             # Run episode for a fixed amount of timesteps
             # to keep rollout size fixed and episodes independent
-            for t in range(0, self.max_trajectory_size):
+            for t_batch in range(0, self.max_trajectory_size):
                 # render gym envs
-                if self.render_video and t % self.render_steps == 0:
+                if self.render_video and t_batch % self.render_steps == 0:
                     frames.append(self.env.render(mode="rgb_array"))
-                
-                t_step += 1 
 
-                # action logic 
+                t_step += 1
+
+                # action logic
                 # sampled via policy which defines behavioral strategy of an agent
                 action, log_probability, _ = self.step(obs)
 
-                # Perform action logic at random 
+                # Perform action logic at random
                 # action, log_probability, _ = self.random_step(obs)
-                        
-                # STEP 3: collecting set of trajectories D_k by running action 
+
+                # STEP 3: collecting set of trajectories D_k by running action
                 # that was sampled from policy in environment
                 __obs, reward, done, info = self.env.step(action)
-                
+
                 # collection of trajectories in batches
                 episode_obs.append(obs)
                 episode_nextobs.append(__obs)
@@ -596,11 +596,11 @@ class PPO_PolicyGradient:
             # stop time per episode
             # Waits for everything to finish running
             # torch.cuda.synchronize()
-            end_epoch = time.time()
-            time_elapsed = end_epoch - start_epoch
+            end_time = time.time()
+            time_elapsed = end_time - start_time
             episode_time.append(time_elapsed)
 
-            episode_lens.append(t + 1) # as we started at 0
+            episode_lens.append(t_batch + 1)  # as we started at 0
             episode_rewards.append(rewards)
 
         # convert trajectories to torch tensors
@@ -613,12 +613,11 @@ class PPO_PolicyGradient:
         return obs, next_obs, actions, action_log_probs, dones, episode_rewards, episode_lens, np.array(episode_time), episode_info, frames
                 
 
-    def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
+    def train(self, values, returns, advantages, prev_log_probs, curr_log_probs, epsilon):
         """Calculate loss and update weights of both networks."""
         # loss of the policy network
         self.policy_net_optim.zero_grad()  # reset optimizer
-        policy_loss = self.policy_net.loss(
-            advantages, batch_log_probs, curr_log_probs, epsilon)
+        policy_loss = self.policy_net.loss(advantages, prev_log_probs, curr_log_probs, epsilon)
         policy_loss.backward()  # backpropagation
         self.policy_net_optim.step()  # single optimization step (updates parameter)
 
@@ -632,7 +631,6 @@ class PPO_PolicyGradient:
 
     def learn(self):
         """"""
-        self.start_time = time.time()
         # start training loop
         training_steps = 0
         done_so_far = 0
@@ -642,12 +640,12 @@ class PPO_PolicyGradient:
             # Collect data over one episode
             # Episode = recording of actions and states that an agent performed from a start state to an end state
             # STEP 3: simulate and collect trajectories --> the following values are all per batch over one episode
-            obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time, ep_info, frames = self.collect_rollout(n_steps=self.n_rollout_steps)
+            obs, next_obs, actions, log_probs, dones, rewards, ep_lens, ep_time, ep_info, frames = self.collect_rollout(n_steps=self.n_rollout_steps)
 
             # experiences simulated so far
             training_steps += np.sum(ep_lens)
 
-            # STEP 4-5: Calculate cummulated reward and advantage at timestep t_step
+            # STEP 4-5: Calculate cummulated reward and advantage at timestep n_steps
             values, _ , _ = self.get_values(obs, actions)
             # Calculate advantage function
             # advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
@@ -660,7 +658,7 @@ class PPO_PolicyGradient:
             for _ in range(self.n_optepochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs, _ = self.get_values(obs, actions)
-                policy_loss, value_loss = self.train(values, cum_returns, advantages, batch_log_probs, curr_log_probs, self.epsilon)
+                policy_loss, value_loss = self.train(values, cum_returns, advantages, log_probs, curr_log_probs, self.epsilon)
                 
                 policy_losses.append(policy_loss.detach().numpy())
                 value_losses.append(value_loss.detach().numpy())
@@ -751,7 +749,6 @@ class PPO_PolicyGradient:
     def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, done_so_far, ep_info, exp_name='experiment', smoothing=None):
         """Calculate stats and log to W&B, CSV, logger """
         mean_ep_drone_dist_gate, mean_ep_drone_dist_origin, mean_ep_drone_y_velocity, mean_ep_drone_y_pos = 0., 0., 0., 0.
-        time_elapsed = int(time.time() - self.start_time)
         
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
@@ -813,7 +810,8 @@ class PPO_PolicyGradient:
                 'train/mean episode runtime': mean_ep_time,
                 'train/mean episode length': mean_ep_len,
                 'train/episodes': done_so_far,
-                'train/time elapsed': time_elapsed,
+                # 'train/time elapsed': time_elapsed,
+
                 # drone info TODO: Fix mean for position
                 'train/drone dist to origin': mean_ep_drone_dist_origin,
                 'train/drone dist to gate': mean_ep_drone_dist_gate,
@@ -821,7 +819,6 @@ class PPO_PolicyGradient:
                 'train/drone y_velocity': mean_ep_drone_y_velocity,
             })
 
-        logging.info('\n')
         logging.info(f'------------ Episode: {training_steps} --------------')
         logging.info(f"Max ep_return:        {max_ep_ret}")
         logging.info(f"Min ep_return:        {min_ep_ret}")

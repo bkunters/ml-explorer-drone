@@ -20,6 +20,7 @@ import os
 import time
 from datetime import datetime
 import argparse
+from gym_pybullet_drones.examples.callback import TrainingCallback
 import numpy as np
 
 import gym
@@ -27,8 +28,9 @@ from gym_pybullet_drones.envs.single_agent_rl.FlyThruGateAviary import FlyThruGa
 from gym_pybullet_drones.envs.single_agent_rl.HoverAviary import HoverAviary
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 
-from stable_baselines3 import A2C
 from stable_baselines3.a2c import MlpPolicy
+from stable_baselines3 import A2C
+from stable_baselines3 import PPO as ppo_sb3
 from stable_baselines3.common.env_checker import check_env
 import ray
 from ray.tune import register_env
@@ -150,11 +152,9 @@ def run(env_id=DEFAULT_ENV,
                     save_code=True)
 
         # stable baseline3
-        model = A2C(MlpPolicy,
-                    env,
-                    verbose=1
-                    )
-        model.learn(total_timesteps=train_steps, wandb=wandb)
+        # model = ppo_sb3(MlpPolicy, env, verbose=1)
+        model = A2C(MlpPolicy, env, verbose=1)
+        model.learn(total_timesteps=train_steps)
 
     elif algo == 'ppo_v2':
         # custom ppo-v2
@@ -304,6 +304,7 @@ def run(env_id=DEFAULT_ENV,
     
     #### Close the environment #################################
     env.close()
+    wandb.run.finish() if wandb and wandb.run else None
 
     #### Save the simulation results ###########################
     logger.save()
