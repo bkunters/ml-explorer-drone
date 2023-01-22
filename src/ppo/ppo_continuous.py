@@ -652,7 +652,7 @@ class PPO_PolicyGradient_V2:
 
     def collect_rollout(self, n_steps=1):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)
-           # TODO: rollout length - 2048 t0 4096
+           A typical rollout length - 2048 t0 4096
         """
 
         t_step, rewards, frames = 0, [], deque(maxlen=24)  # 4 fps - 6 sec
@@ -679,7 +679,7 @@ class PPO_PolicyGradient_V2:
 
             # measure time elapsed for one episode
             # torch.cuda.synchronize()
-            start_epoch = time.time()
+            start_time = time.time()
 
             # Run episode for a fixed amount of timesteps
             # to keep rollout size fixed and episodes independent
@@ -718,8 +718,8 @@ class PPO_PolicyGradient_V2:
             # stop time per episode
             # Waits for everything to finish running
             # torch.cuda.synchronize()
-            end_epoch = time.time()
-            time_elapsed = end_epoch - start_epoch
+            end_time = time.time()
+            time_elapsed = end_time - start_time
             episode_time.append(time_elapsed)
 
             episode_lens.append(t_batch + 1)  # as we started at 0
@@ -880,7 +880,6 @@ class PPO_PolicyGradient_V2:
 
     def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, done_so_far, exp_name='experiment'):
         """Calculate stats and log to W&B, CSV, logger """
-        time_elapsed = int(time.time() - self.start_time)
         
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
@@ -925,7 +924,7 @@ class PPO_PolicyGradient_V2:
             'train/mean episode runtime': mean_ep_time,
             'train/mean episode length': mean_ep_len,
             'train/episodes': done_so_far,
-            'train/time elapsed': time_elapsed,
+            # 'train/time elapsed': time_elapsed,
         })
 
         logging.info('\n')
