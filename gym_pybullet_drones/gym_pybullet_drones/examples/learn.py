@@ -166,8 +166,7 @@ def run(env_id=DEFAULT_ENV,
                             gae_lambda=0.95,
                             gamma=0.99,
                             adam_eps=1e-7,
-                            seed=seed,
-                            exp_name=exp_name
+                            seed=seed
                         ) 
         # train PPO
         agent = trainer.create_ppo()
@@ -294,10 +293,10 @@ def run(env_id=DEFAULT_ENV,
         if gui:
             sync(i, start, env.TIMESTEP)
         
-        if wandb:
-            wandb.log({
-                    'test/episode returns': reward
-                })
+        # if wandb:
+        #     wandb.log({
+        #             'test/episode returns': reward
+        #         })
 
         if done:
             obs = env.reset()

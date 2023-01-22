@@ -138,7 +138,7 @@ class FlyThruGateAviary(BaseSingleAgentAviary):
         
         # current position
         y_position = state[9]
-        y_veloctiy = state[12]
+        z_veloctiy = state[12]
         
         # Euclidean distance
         dist_to_origin = np.linalg.norm(np.array([0, 0, 1]) - state[0:3])**2 ### squared Euclidean distance to origin
@@ -146,7 +146,7 @@ class FlyThruGateAviary(BaseSingleAgentAviary):
         return {
                 "dist_to_gate": dist_to_gate,
                 "dist_to_origin": dist_to_origin,
-                "z_velocity": y_veloctiy,
+                "z_velocity": z_veloctiy,
                 "y_position": y_position
             } 
 

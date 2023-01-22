@@ -1,0 +1,6 @@
+,experiment,timestep,mean episodic runtime,mean episodic length,eval episodes,mean episodic returns,min episodic returns,max episodic returns,std episodic returns,episodes,training time
+0,exp_name: hover-aviary-v0_2023-01-22,2048,0.000548,1.0,2048,-0.787656,-0.787693,-0.787619,1.1e-05,1,29.179298877716064
+1,exp_name: hover-aviary-v0_2023-01-22,4096,0.000592,1.0,2048,-0.787655,-0.787689,-0.787614,1.1e-05,2,59.282949924468994
+2,exp_name: hover-aviary-v0_2023-01-22,6144,0.000552,1.0,2048,-0.787655,-0.787687,-0.787623,1e-05,3,88.67567181587219
+3,exp_name: hover-aviary-v0_2023-01-22,8192,0.000534,1.0,2048,-0.787653,-0.787688,-0.787616,1.1e-05,4,117.7305428981781
+4,exp_name: hover-aviary-v0_2023-01-22,10240,0.000557,1.0,2048,-0.787651,-0.787689,-0.787611,1.1e-05,5,147.17868304252625
