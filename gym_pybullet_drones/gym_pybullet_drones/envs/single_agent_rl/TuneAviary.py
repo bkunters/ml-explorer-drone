@@ -140,7 +140,22 @@ class TuneAviary(BaseSingleAgentAviary):
             Dummy value.
 
         """
-        return {"answer": 42} #### Calculated by the Deep Thought supercomputer in 7.5M years
+        state = self._getDroneStateVector(0)
+        
+        # current position
+        y_position = state[9]
+        y_veloctiy = state[12]
+        
+        # Euclidean distance
+        i = min(int(self.step_counter / self.AGGR_PHY_STEPS), self.TRAJ_STEPS - 1)
+        dist_to_taget = np.linalg.norm(self.TARGET_POSITION[i, :]-state[0:3])**2 ### squared Euclidean distance to target trajectory
+        dist_to_origin = np.linalg.norm(self.INIT_XYZS - state[0:3])**2 ### squared Euclidean distance to origin
+        return {
+                "dist_to_gate": dist_to_taget,
+                "dist_to_origin": dist_to_origin,
+                "z_velocity": y_veloctiy,
+                "y_position": y_position
+            } 
 
     ################################################################################
     

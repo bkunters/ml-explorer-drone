@@ -210,6 +210,7 @@ class PPO_PolicyGradient:
         self.device = device
         self.normalize_advantage = normalize_adv
         self.normalize_return = normalize_ret
+        self.seed = seed
 
         # keep track of information
         self.exp_path = exp_path
@@ -816,7 +817,7 @@ class PPO_PolicyGradient:
             'train/drone dist to origin': mean_drone_dist_origin,
             'train/drone dist to gate': mean_drone_dist_gate,
             'train/drone y position': mean_drone_y_pos,
-            'train/drone y velocity': mean_drone_y_vel,
+            'train/drone z velocity': mean_drone_y_vel,
         })
 
         logging.info('\n')
@@ -1091,6 +1092,7 @@ class PPOTrainer:
 
     def get_policy(self):
         checkpoints = os.path.join(self.model_dir, f'{self.env_name}_policyNet.pth')
+        logging.info(f"Loading model from {checkpoints}")
         policy_net = PolicyNet(self.obs_dim, self.act_dim)
         policy_net = load_model(checkpoints, policy_net, self.device)
         return policy_net

@@ -20,6 +20,7 @@ import os
 import time
 from datetime import datetime
 import argparse
+from gym_pybullet_drones.envs.single_agent_rl.TuneAviary import TuneAviary
 from gym_pybullet_drones.examples.callback import TrainingCallback
 import numpy as np
 
@@ -113,7 +114,7 @@ def run(env_id=DEFAULT_ENV,
     #### Check the environment's spaces ########################
     #############################################################
     
-    if not env_id in ['takeoff', 'hover', 'flythrugate']: 
+    if not env_id in ['takeoff', 'hover', 'flythrugate', 'tune']: 
         print("[ERROR] 1D action space is only compatible with Takeoff- and HoverAviary")
         exit()
 
@@ -152,17 +153,16 @@ def run(env_id=DEFAULT_ENV,
                     save_code=True)
 
         # stable baseline3
-        # model = ppo_sb3(MlpPolicy, env, verbose=1)
-        model = A2C(MlpPolicy, env, verbose=1)
-        model.learn(total_timesteps=train_steps)
+        callback = TrainingCallback(wandb=wandb)
+        model = ppo_sb3(MlpPolicy, env, verbose=1)
+        # model = A2C(MlpPolicy, env, verbose=1)
+        model.learn(total_timesteps=train_steps, callback=callback)
 
     elif algo == 'ppo_v2':
         # custom ppo-v2
         trainer = ppo_v2.PPOTrainer(
                             env, 
                             total_training_steps=train_steps, # shorter just for testing
-                            n_optepochs=64,
-                            epsilon=0.22,
                             gae_lambda=0.95,
                             gamma=0.99,
                             adam_eps=1e-7,
@@ -257,11 +257,20 @@ def run(env_id=DEFAULT_ENV,
                                 physics=physics,
                                 record=record_video
                             )
+    elif env_id == 'tune':
+        env = TuneAviary(drone_model=drone,
+                                freq=simulation_freq_hz,
+                                aggregate_phy_steps=AGGR_PHY_STEPS,
+                                gui=gui,
+                                physics=physics,
+                                record=record_video
+                            )
     logger = Logger(logging_freq_hz=int(env.SIM_FREQ/env.AGGR_PHY_STEPS),
                     num_drones=num_drones,
                     output_folder=output_folder,
                     colab=colab
                     )
+    
     obs = env.reset()
     start = time.time()
     for i in range(30000*env.SIM_FREQ):

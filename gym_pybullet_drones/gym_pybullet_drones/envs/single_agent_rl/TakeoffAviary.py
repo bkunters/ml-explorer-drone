@@ -117,7 +117,7 @@ class TakeoffAviary(BaseSingleAgentAviary):
         y_veloctiy = state[12]
         
         # Euclidean distance
-        dist_to_origin = np.linalg.norm(np.array([0, 0, 1]) - state[0:3])**2 ### squared Euclidean distance to origin
+        dist_to_origin = np.linalg.norm(self.INIT_XYZS - state[0:3])**2 ### squared Euclidean distance to origin
         return {
                 "dist_to_gate": 0,
                 "dist_to_origin": dist_to_origin,
