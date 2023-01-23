@@ -31,11 +31,11 @@ from gym_pybullet_drones.utils.enums import DroneModel, Physics
 
 from stable_baselines3.a2c import MlpPolicy
 from stable_baselines3 import A2C
-from stable_baselines3 import PPO as ppo_sb3
+from stable_baselines3 import PPO as PPO_SB3
 from stable_baselines3.common.env_checker import check_env
 import ray
 from ray.tune import register_env
-from ray.rllib.agents import ppo as rrlib_ppo
+from ray.rllib.agents import ppo as PPO_RLIB
 import wandb
 
 from gym_pybullet_drones.utils.Logger import Logger
@@ -154,7 +154,7 @@ def run(env_id=DEFAULT_ENV,
 
         # stable baseline3
         callback = TrainingCallback(wandb=wandb)
-        model = ppo_sb3(MlpPolicy, env, verbose=1)
+        model = PPO_SB3(MlpPolicy, env, verbose=1)
         # model = A2C(MlpPolicy, env, verbose=1)
         model.learn(total_timesteps=train_steps, callback=callback)
 
@@ -198,11 +198,11 @@ def run(env_id=DEFAULT_ENV,
                     save_code=True)
 
         register_env(env_id, lambda _: TakeoffAviary())
-        config = rrlib_ppo.DEFAULT_CONFIG.copy()
+        config = PPO_RLIB.DEFAULT_CONFIG.copy()
         config["num_workers"] = 2
         config["framework"] = "torch"
         config["env"] = env_id
-        agent = rrlib_ppo.PPOTrainer(config)
+        agent = PPO_RLIB.PPOTrainer(config)
 
 
         for i in range(train_steps):
@@ -280,14 +280,18 @@ def run(env_id=DEFAULT_ENV,
             action, _states = model.predict(obs, deterministic=True)
         elif algo == 'ppo_v2':
             action = policy(obs).detach().numpy()
+        elif algo == 'ppo_rllib':
+            action, _states, _dict = policy.compute_single_action(obs)
         
         # update environment
         obs, reward, done, info = env.step(action)
+        
         logger.log(drone=0,
                    timestamp=i/env.SIM_FREQ,
                    state=np.hstack([obs[0:3], np.zeros(4), obs[3:15],  np.resize(action, (4))]),
                    control=np.zeros(12)
                    )
+        
         if i%env.SIM_FREQ == 0:
             env.render()
             print(done)
