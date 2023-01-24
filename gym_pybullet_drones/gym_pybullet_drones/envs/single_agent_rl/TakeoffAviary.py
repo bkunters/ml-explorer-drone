@@ -111,18 +111,17 @@ class TakeoffAviary(BaseSingleAgentAviary):
 
         """
         state = self._getDroneStateVector(0)
-        
-        # current position
-        y_position = state[9]
-        y_veloctiy = state[12]
-        
         # Euclidean distance
         dist_to_origin = np.linalg.norm(self.INIT_XYZS - state[0:3])**2 ### squared Euclidean distance to origin
         return {
-                "dist_to_gate": 0,
-                "dist_to_origin": dist_to_origin,
-                "z_velocity": y_veloctiy,
-                "y_position": y_position
+                "dist_to_target": 0,
+                "dist_to_start_point": dist_to_origin,
+                "x_position": state[0],
+                "y_position": state[1],
+                "z_position": state[2],
+                "x_velocity": state[10],
+                "y_velocity": state[11],
+                "z_velocity": state[12]
             } 
 
     ################################################################################
@@ -143,12 +142,12 @@ class TakeoffAviary(BaseSingleAgentAviary):
             (20,)-shaped array of floats containing the normalized state of a single drone.
 
         """
+        ##### Constraints the mission ########################################
+        MAX_LIN_VEL_XY = 0.4 # 3 
+        MAX_LIN_VEL_Z = 0.2 # 1 - how fast to move up 
 
-        MAX_LIN_VEL_XY = 3 
-        MAX_LIN_VEL_Z = 1
-
-        MAX_XY = MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
-        MAX_Z = MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC
+        MAX_XY = 0.5 # MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
+        MAX_Z = 1 # MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC # Max hight to reach 
 
         MAX_PITCH_ROLL = np.pi # Full range
 

@@ -106,16 +106,33 @@ class HoverAviary(BaseSingleAgentAviary):
         state = self._getDroneStateVector(0)
         
         # current position
-        y_position = state[9]
-        y_veloctiy = state[12]
-        
+        cur_pos = state[0:3]
+        cur_quat = state[3:7]
+        cur_rpy = state[7:10] # roll, pitch, yaw
+        cur_vel = state[10:13]
+        cur_ang_vel = state[13:16]
+
         # Euclidean distance to initial start pos
-        dist_to_origin = np.linalg.norm(self.INIT_XYZS - state[0:3])**2 ### squared Euclidean distance to origin
+        dist_to_start = np.linalg.norm(self.INIT_XYZS - state[0:3])**2 ### squared Euclidean distance to start position
         return {
-                "dist_to_gate": 0,
-                "dist_to_origin": dist_to_origin,
-                "z_velocity": y_veloctiy,
-                "y_position": y_position
+                "dist_to_target": 0,
+                "dist_to_start_point": dist_to_start,
+                "x_position": cur_pos[0],
+                "y_position": cur_pos[1],
+                "z_position": cur_pos[2],
+                "roll": cur_rpy[0],
+                "pitch": cur_rpy[1],
+                "yaw": cur_rpy[2],
+                "quat_one": cur_quat[0],
+                "quat_two": cur_quat[1],
+                "quat_three": cur_quat[2],
+                "quat_four": cur_quat[3],
+                "x_velocity": cur_vel[0],
+                "y_velocity": cur_vel[1],
+                "z_velocity": cur_vel[2],
+                "x_angl_velocity": cur_ang_vel[0],
+                "y_angl_velocity": cur_ang_vel[1],
+                "z_angl_velocity": cur_ang_vel[2],
             } 
 
     ################################################################################
@@ -136,11 +153,12 @@ class HoverAviary(BaseSingleAgentAviary):
             (20,)-shaped array of floats containing the normalized state of a single drone.
 
         """
-        MAX_LIN_VEL_XY = 3 
-        MAX_LIN_VEL_Z = 1
+        ##### Constraints the mission ########################################
+        MAX_LIN_VEL_XY = 0.4 # 3 
+        MAX_LIN_VEL_Z = 0.2 # 1 - how fast to move up 
 
-        MAX_XY = MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
-        MAX_Z = MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC
+        MAX_XY = 0.5 # MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
+        MAX_Z = 1 # MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC # Max hight to reach 
 
         MAX_PITCH_ROLL = np.pi # Full range
 
@@ -149,6 +167,8 @@ class HoverAviary(BaseSingleAgentAviary):
         clipped_rp = np.clip(state[7:9], -MAX_PITCH_ROLL, MAX_PITCH_ROLL)
         clipped_vel_xy = np.clip(state[10:12], -MAX_LIN_VEL_XY, MAX_LIN_VEL_XY)
         clipped_vel_z = np.clip(state[12], -MAX_LIN_VEL_Z, MAX_LIN_VEL_Z)
+
+        ######################################################################
 
         if self.GUI:
             self._clipAndNormalizeStateWarning(state,

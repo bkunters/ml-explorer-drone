@@ -175,11 +175,12 @@ class TuneAviary(BaseSingleAgentAviary):
             (20,)-shaped array of floats containing the normalized state of a single drone.
 
         """
-        MAX_LIN_VEL_XY = 3 
-        MAX_LIN_VEL_Z = 1
+        ##### Constraints the mission ########################################
+        MAX_LIN_VEL_XY = 0.4 # 3 
+        MAX_LIN_VEL_Z = 0.2 # 1 - how fast to move up 
 
-        MAX_XY = MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
-        MAX_Z = MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC
+        MAX_XY = 0.5 # MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
+        MAX_Z = 1 # MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC # Max hight to reach 
 
         MAX_PITCH_ROLL = np.pi # Full range
 

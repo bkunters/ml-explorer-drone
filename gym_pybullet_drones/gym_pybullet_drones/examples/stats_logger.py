@@ -8,7 +8,9 @@ import os
 
 # switch style
 sns.set_theme()
-sns.set_context("notebook", font_scale=1.5, rc={"lines.linewidth": 2.5})
+sns.set(style="ticks")
+sns.set_style("whitegrid")
+sns.set_context("paper", font_scale=1.5, rc={"lines.linewidth": 1.5})
 diverging_colors = sns.color_palette("RdBu", 10)
 
 # setup plotting 
@@ -94,8 +96,7 @@ class StatsPlotter:
                 smoothing=None, 
                 wandb=None):
 
-        # get values from df
-        # add smoothing
+        # get values from df and add smoothing
         if smoothing:
             df_min = gaussian_filter1d(dataframe[y_min].to_numpy(), sigma=smoothing)
             df_max = gaussian_filter1d(dataframe[y_max].to_numpy(), sigma=smoothing)
@@ -121,7 +122,8 @@ class StatsPlotter:
 
         # plot the file to given destination
         ax.figure.savefig(self.file_name_and_path)
-        
+        plt.grid()
+
         # show for 3 sec
         plt.show(block=False)
         plt.pause(3)
