@@ -104,35 +104,20 @@ class HoverAviary(BaseSingleAgentAviary):
 
         """
         state = self._getDroneStateVector(0)
-        
-        # current position
-        cur_pos = state[0:3]
-        cur_quat = state[3:7]
-        cur_rpy = state[7:10] # roll, pitch, yaw
-        cur_vel = state[10:13]
-        cur_ang_vel = state[13:16]
-
+    
         # Euclidean distance to initial start pos
         dist_to_start = np.linalg.norm(self.INIT_XYZS - state[0:3])**2 ### squared Euclidean distance to start position
         return {
                 "dist_to_target": 0,
                 "dist_to_start_point": dist_to_start,
-                "x_position": cur_pos[0],
-                "y_position": cur_pos[1],
-                "z_position": cur_pos[2],
-                "roll": cur_rpy[0],
-                "pitch": cur_rpy[1],
-                "yaw": cur_rpy[2],
-                "quat_one": cur_quat[0],
-                "quat_two": cur_quat[1],
-                "quat_three": cur_quat[2],
-                "quat_four": cur_quat[3],
-                "x_velocity": cur_vel[0],
-                "y_velocity": cur_vel[1],
-                "z_velocity": cur_vel[2],
-                "x_angl_velocity": cur_ang_vel[0],
-                "y_angl_velocity": cur_ang_vel[1],
-                "z_angl_velocity": cur_ang_vel[2],
+                "x_position": state[0],
+                "y_position": state[1],
+                "z_position": state[2],
+                "roll": state[7],
+                "pitch": state[8],
+                "x_velocity": state[10],
+                "y_velocity": state[11],
+                "z_velocity": state[12]
             } 
 
     ################################################################################
@@ -153,20 +138,22 @@ class HoverAviary(BaseSingleAgentAviary):
             (20,)-shaped array of floats containing the normalized state of a single drone.
 
         """
+        print("######### Normalize #########")
+        
         ##### Constraints the mission ########################################
-        MAX_LIN_VEL_XY = 0.4 # 3 
-        MAX_LIN_VEL_Z = 0.2 # 1 - how fast to move up 
+        self.MAX_LIN_VEL_XY = 0.4 # 3 
+        self.MAX_LIN_VEL_Z = 0.2 # 1 - how fast to move up 
 
-        MAX_XY = 0.5 # MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
-        MAX_Z = 1 # MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC # Max hight to reach 
+        self.MAX_XY = 0.5 # MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
+        self.MAX_Z = 1 # MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC # Max hight to reach 
 
-        MAX_PITCH_ROLL = np.pi # Full range
+        self.MAX_PITCH_ROLL = np.pi # Full range
 
-        clipped_pos_xy = np.clip(state[0:2], -MAX_XY, MAX_XY)
-        clipped_pos_z = np.clip(state[2], 0, MAX_Z)
-        clipped_rp = np.clip(state[7:9], -MAX_PITCH_ROLL, MAX_PITCH_ROLL)
-        clipped_vel_xy = np.clip(state[10:12], -MAX_LIN_VEL_XY, MAX_LIN_VEL_XY)
-        clipped_vel_z = np.clip(state[12], -MAX_LIN_VEL_Z, MAX_LIN_VEL_Z)
+        clipped_pos_xy = np.clip(state[0:2], -self.MAX_XY, self.MAX_XY)
+        clipped_pos_z = np.clip(state[2], 0, self.MAX_Z)
+        clipped_rp = np.clip(state[7:9], -self.MAX_PITCH_ROLL, self.MAX_PITCH_ROLL)
+        clipped_vel_xy = np.clip(state[10:12], -self.MAX_LIN_VEL_XY, self.MAX_LIN_VEL_XY)
+        clipped_vel_z = np.clip(state[12], -self.MAX_LIN_VEL_Z, self.MAX_LIN_VEL_Z)
 
         ######################################################################
 
@@ -179,12 +166,12 @@ class HoverAviary(BaseSingleAgentAviary):
                                                clipped_vel_z
                                                )
 
-        normalized_pos_xy = clipped_pos_xy / MAX_XY
-        normalized_pos_z = clipped_pos_z / MAX_Z
-        normalized_rp = clipped_rp / MAX_PITCH_ROLL
+        normalized_pos_xy = clipped_pos_xy / self.MAX_XY
+        normalized_pos_z = clipped_pos_z / self.MAX_Z
+        normalized_rp = clipped_rp / self.MAX_PITCH_ROLL
         normalized_y = state[9] / np.pi # No reason to clip
-        normalized_vel_xy = clipped_vel_xy / MAX_LIN_VEL_XY
-        normalized_vel_z = clipped_vel_z / MAX_LIN_VEL_XY
+        normalized_vel_xy = clipped_vel_xy / self.MAX_LIN_VEL_XY
+        normalized_vel_z = clipped_vel_z / self.MAX_LIN_VEL_XY
         normalized_ang_vel = state[13:16]/np.linalg.norm(state[13:16]) if np.linalg.norm(state[13:16]) != 0 else state[13:16]
 
         norm_and_clipped = np.hstack([normalized_pos_xy,

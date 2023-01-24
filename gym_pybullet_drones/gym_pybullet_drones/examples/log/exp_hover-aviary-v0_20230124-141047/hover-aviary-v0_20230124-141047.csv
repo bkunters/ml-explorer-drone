@@ -1,0 +1,6 @@
+,experiment,timestep,mean episodic runtime,mean episodic length,eval episodes,mean episodic returns,min episodic returns,max episodic returns,std episodic returns,episodes,training time
+0,exp_name: hover_ppo_v2_2023-01-24,2048,0.000817,1.0,2048,-0.787656,-0.787695,-0.787618,1.1e-05,1,31.387674808502197
+1,exp_name: hover_ppo_v2_2023-01-24,4096,0.000763,1.0,2048,-0.787656,-0.787696,-0.787619,1.1e-05,2,61.61889982223511
+2,exp_name: hover_ppo_v2_2023-01-24,6144,0.000794,1.0,2048,-0.787656,-0.787692,-0.787613,1.1e-05,3,92.62942886352539
+3,exp_name: hover_ppo_v2_2023-01-24,8192,0.000785,1.0,2048,-0.787655,-0.787693,-0.78762,1.1e-05,4,123.49335503578186
+4,exp_name: hover_ppo_v2_2023-01-24,10240,0.000753,1.0,2048,-0.787655,-0.787688,-0.787612,1.1e-05,5,153.66614198684692

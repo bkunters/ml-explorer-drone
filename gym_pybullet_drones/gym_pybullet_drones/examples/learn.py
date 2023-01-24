@@ -59,7 +59,7 @@ EPISODE_REWARD_THRESHOLD = -0 # Upperbound: rewards are always negative, but non
 DEFAULT_VISION = False
 DEFAULT_ENV = 'takeoff' #"takeoff", "hover", 'flythrugate'
 DEFAULT_OBS = ObservationType('kin')
-DEFAULT_ACT = ActionType('one_d_rpm') # ActionType('one_d_rpm') - 'rpm'for each rotor being independently learned
+DEFAULT_ACT = ActionType('pid') # ActionType('one_d_rpm') - 'rpm'for each rotor being independently learned
 DEFAULT_RLLIB = True
 DEFAULT_ALGO = 'ppo_v2'
 # drones
@@ -68,7 +68,8 @@ DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
 # simulation of env
 DEFAULT_AGGREGATE = True
-DEFAULT_SIMULATION_FREQ_HZ = 240
+DEFAULT_AGGREGATE_STEPS = 5
+DEFAULT_SIMULATION_FREQ_HZ = 60
 DEFAULT_CONTROL_FREQ_HZ = 48
 # gui and logging
 DEFAULT_GUI = True
@@ -142,17 +143,15 @@ def run(env_id=DEFAULT_ENV,
     env_name = env_id + "-aviary-v0"
     print("[INFO] You selected env:", env_id)
     # make env
-    env = make_env(env_name, seed=seed)
-    train_env = gym.make(env_name, aggregate_phy_steps=AGGR_PHY_STEPS, obs=obs, act=act) # single environment instead of a vectorized one    
-    
+    env = make_env(env_name, act=act, obs=obs, seed=seed)
     print("[INFO] Action space:", env.action_space)
     print("[INFO] Observation space:", env.observation_space)
     
-    check_env(train_env, warn=True, skip_render_check=True)
+    check_env(env, warn=True, skip_render_check=True)
 
-    print(train_env.action_space.sample())
+    print(env.action_space.sample())
 
-    exp_name = f"exp_name: {env_id}_{algo}_{CURR_DATE}"
+    exp_name = f"exp_name: {env_id}_{algo}_{act}_{CURR_DATE}"
     ############################################################
     #### Train the model #######################################
     ############################################################
@@ -175,7 +174,7 @@ def run(env_id=DEFAULT_ENV,
         # stable baseline3
         # create agent and train
         callback = TrainingCallback(wandb=wandb)
-        model = A2C_SB3(MlpPolicy, train_env, verbose=1)
+        model = A2C_SB3(MlpPolicy, env, verbose=1)
         model.learn(total_timesteps=train_steps, callback=callback)
 
     elif algo == 'ppo_sb3':
@@ -197,13 +196,13 @@ def run(env_id=DEFAULT_ENV,
         # stable baseline3
         # create agent and train
         callback = TrainingCallback(wandb=wandb)
-        model = PPO_SB3(MlpPolicy, train_env, verbose=1)
+        model = PPO_SB3(MlpPolicy, env, verbose=1)
         model.learn(total_timesteps=train_steps, callback=callback)
 
     elif algo == 'ppo_v2':
         # custom ppo-v2
         trainer = ppo_v2.PPOTrainer(
-                            train_env, 
+                            env, 
                             total_training_steps=train_steps, # shorter just for testing
                             n_rollout_steps=2048,
                             gae_lambda=0.95,
@@ -248,7 +247,6 @@ def run(env_id=DEFAULT_ENV,
         config["env"] = env_id
         agent = PPO_RLIB.PPOTrainer(config)
 
-
         for i in range(train_steps):
             results = agent.train()
 
@@ -283,7 +281,9 @@ def run(env_id=DEFAULT_ENV,
                                 aggregate_phy_steps=AGGR_PHY_STEPS,
                                 gui=gui,
                                 physics=physics,
-                                record=record_video
+                                record=record_video,
+                                act=act,
+                                obs=obs
                             )
     elif env_name == "hover-aviary-v0": 
         env = HoverAviary(drone_model=drone,
@@ -291,7 +291,9 @@ def run(env_id=DEFAULT_ENV,
                             aggregate_phy_steps=AGGR_PHY_STEPS,
                             gui=gui,
                             physics=physics,
-                            record=record_video
+                            record=record_video,
+                            act=act,
+                            obs=obs
                             )
     elif env_name == "flythrugate-aviary-v0": 
         env = FlyThruGateAviary(drone_model=drone,
@@ -299,7 +301,9 @@ def run(env_id=DEFAULT_ENV,
                                     aggregate_phy_steps=AGGR_PHY_STEPS,
                                     gui=gui,
                                     physics=physics,
-                                    record=record_video
+                                    record=record_video,
+                                    act=act,
+                                    obs=obs
                                 )
     elif env_name == "tune-aviary-v0": 
         env = TuneAviary(drone_model=drone,
@@ -307,7 +311,9 @@ def run(env_id=DEFAULT_ENV,
                                     aggregate_phy_steps=AGGR_PHY_STEPS,
                                     gui=gui,
                                     physics=physics,
-                                    record=record_video
+                                    record=record_video,
+                                    act=act,
+                                    obs=obs
                                 )
     logger = Logger(logging_freq_hz=int(env.SIM_FREQ/env.AGGR_PHY_STEPS),
                     num_drones=num_drones,
@@ -369,12 +375,13 @@ def run(env_id=DEFAULT_ENV,
 #######################################
 #######################################
 
-def make_env(env_id: Union[str, Type[gym.Env]], seed: Optional[int] = None):
+def make_env(env_id: Union[str, Type[gym.Env]], act: ActionType=ActionType.RPM, obs: ObservationType=ObservationType.KIN, seed: Optional[int]=None):
     if isinstance(env_id, str):
-        env = gym.make(env_id)
-    env.seed(seed)
-    env.action_space.seed(seed)
-    env.observation_space.seed(seed)
+        env = gym.make(env_id, act=act, obs=obs) # single environment instead of a vectorized one  
+    if seed:
+        env.seed(seed)
+        env.action_space.seed(seed)
+        env.observation_space.seed(seed)
     return env
 
 def arg_parser():
