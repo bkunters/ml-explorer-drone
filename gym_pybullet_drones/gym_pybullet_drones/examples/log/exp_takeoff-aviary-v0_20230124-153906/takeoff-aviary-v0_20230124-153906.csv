@@ -1,0 +1,6 @@
+,experiment,timestep,mean episodic runtime,mean episodic length,eval episodes,mean episodic returns,min episodic returns,max episodic returns,std episodic returns,episodes,training time
+0,exp_name: takeoff_ppo_v2_ActionType.PID_2023-01-24,2048,0.000701,1.0,2048,-0.888889,-0.889662,-0.887238,0.000428,1,28.86560893058777
+1,exp_name: takeoff_ppo_v2_ActionType.PID_2023-01-24,4096,0.000741,1.0,2048,-0.888863,-0.889662,-0.887417,0.000436,2,58.3007378578186
+2,exp_name: takeoff_ppo_v2_ActionType.PID_2023-01-24,6144,0.000648,1.0,2048,-0.888899,-0.889662,-0.887468,0.000425,3,86.1877989768982
+3,exp_name: takeoff_ppo_v2_ActionType.PID_2023-01-24,8192,0.000663,1.0,2048,-0.888867,-0.889662,-0.887275,0.000427,4,114.45989608764648
+4,exp_name: takeoff_ppo_v2_ActionType.PID_2023-01-24,10240,0.000746,1.0,2048,-0.888851,-0.889662,-0.887229,0.000433,5,144.24722599983215

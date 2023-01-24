@@ -26,8 +26,10 @@ Will be continued in the future...
 [1] Installation
 
 Create conda env
-- ```$ conda create --name ppo_drone_py39 python=3.9```
-- ```$ conda activate ppo_drone_py39```
+- ```$ conda create --name ppo_drone_py38 python=3.8```
+- ```$ conda activate ppo_drone_py38```
+
+Hint: Needs to be python=3.9 for Apple Silicon.
 
 Installation
 - ```$ pip install -r requirements_pybullet.txt```
