@@ -27,6 +27,7 @@ from gym_pybullet_drones.envs.single_agent_rl.BaseSingleAgentAviary import Actio
 from gym_pybullet_drones.envs.single_agent_rl.TuneAviary import TuneAviary
 from gym_pybullet_drones.examples.callback import TrainingCallback
 import numpy as np
+import random
 
 import gym
 from gym_pybullet_drones.envs.single_agent_rl.FlyThruGateAviary import FlyThruGateAviary
@@ -111,11 +112,18 @@ def run(env_id=DEFAULT_ENV,
         record_video=DEFAULT_RECORD_VIDEO, 
         seed=DEFAULT_SEED,
         cpu=DEFAULT_CPU):
+
+    #############################################################
+    #### Seed everything for reproducibility ####################
+    #############################################################
     
+    random.seed(seed)
+    np.random.seed(seed)
+
     #############################################################
     #### Initialize spaces ########################
     #############################################################
-
+    
     AGGR_PHY_STEPS = int(simulation_freq_hz/control_freq_hz) if aggregate else 1
 
     if not os.path.exists(output_folder):
@@ -150,8 +158,8 @@ def run(env_id=DEFAULT_ENV,
     check_env(env, warn=True, skip_render_check=True)
 
     print(env.action_space.sample())
-
     exp_name = f"exp_name: {env_id}_{algo}_{act}_{CURR_DATE}"
+    
     ############################################################
     #### Train the model #######################################
     ############################################################
@@ -204,10 +212,12 @@ def run(env_id=DEFAULT_ENV,
         trainer = ppo_v2.PPOTrainer(
                             env, 
                             total_training_steps=train_steps, # shorter just for testing
+                            n_optepochs=21,
                             n_rollout_steps=2048,
                             gae_lambda=0.95,
                             gamma=0.99,
                             adam_eps=1e-7,
+                            clip_ratio=0.2,
                             seed=seed,
                             exp_name=exp_name
                         ) 

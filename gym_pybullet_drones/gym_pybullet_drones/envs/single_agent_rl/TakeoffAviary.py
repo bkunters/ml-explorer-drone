@@ -71,12 +71,15 @@ class TakeoffAviary(BaseSingleAgentAviary):
             The reward.
 
         """
+        reward = 0
         state = self._getDroneStateVector(0)
+        drone_y_pos = state[2]
         # return state[2]/10.  # Alternative reward space, see PR #32
-        if state[2] < 0.02:
-            return -5
+        if drone_y_pos < 0.02:
+            reward = -5
         else:
-            return -1 / (10*state[2])
+            reward = -1 / (10*drone_y_pos)
+        return reward 
 
     ################################################################################
     
@@ -111,14 +114,11 @@ class TakeoffAviary(BaseSingleAgentAviary):
 
         """
         state = self._getDroneStateVector(0)
-        # Euclidean distance
-        dist_to_origin = np.linalg.norm(self.INIT_XYZS - state[0:3])**2 ### squared Euclidean distance to origin
+        dist_to_start = np.linalg.norm(self.INIT_XYZS - state[0:3])**2 
+        ### squared Euclidean distance to start location
         return {
-                "dist_to_target": 0,
-                "dist_to_start_point": dist_to_origin,
-                "x_position": state[0],
-                "y_position": state[1],
-                "z_position": state[2],
+                "dist_to_start_point": dist_to_start,
+                "y_position": state[2],
                 "x_velocity": state[10],
                 "y_velocity": state[11],
                 "z_velocity": state[12]
@@ -143,11 +143,11 @@ class TakeoffAviary(BaseSingleAgentAviary):
 
         """
         ##### Constraints the mission ########################################
-        MAX_LIN_VEL_XY = 0.4 # 3 
-        MAX_LIN_VEL_Z = 0.2 # 1 - how fast to move up 
+        MAX_LIN_VEL_XY = 3 
+        MAX_LIN_VEL_Z = 1 # how fast to move up 
 
-        MAX_XY = 0.5 # MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
-        MAX_Z = 1 # MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC # Max hight to reach 
+        MAX_XY = MAX_LIN_VEL_XY*self.EPISODE_LEN_SEC
+        MAX_Z = MAX_LIN_VEL_Z*self.EPISODE_LEN_SEC # Max hight to reach 
 
         MAX_PITCH_ROLL = np.pi # Full range
 

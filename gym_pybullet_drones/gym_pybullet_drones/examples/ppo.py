@@ -1,5 +1,7 @@
 from collections import deque
+import random
 import time
+from gym_pybullet_drones.examples.utils import proc_id
 import torch
 from torch import nn
 from torch.optim import Adam, SGD
@@ -121,6 +123,8 @@ class PolicyNet_CNN(Net):
                               clip_eps).to(torch.float).mean()
         return policy_loss.mean()  # return mean
 
+        
+
 ####################
 
 
@@ -170,7 +174,7 @@ class PolicyNet_MLP(Net):
         out = self.layer3(x)  # head has linear activation (continuous space)
         return out
 
-    def loss(self, advantages, batch_log_probs, curr_log_probs, clip_eps=0.2):
+    def loss(self, advantages, old_log_probs, curr_log_probs, clip_eps=0.2):
         """ Make the clipped surrogate objective function to compute policy loss.
                 - The ratio is clipped to be close to 1. 
                 - The clipping ensures that the update will not be too large so that training is more stable.
@@ -178,16 +182,19 @@ class PolicyNet_MLP(Net):
                   if the ratio is not between 1-ϵ and 1+ϵ.
         """
         # ratio between pi_theta(a_t | s_t) / pi_theta_k(a_t | s_t)
-        ratio = torch.exp(curr_log_probs - batch_log_probs)
+        ratio = torch.exp(curr_log_probs - old_log_probs)
         clip_1 = ratio * advantages
         clip_2 = torch.clamp(ratio, 1.0 - clip_eps,
                              1.0 + clip_eps) * advantages
         # negative as Adam mins loss, but we want to max it
-        policy_loss = (-torch.min(clip_1, clip_2))
+        loss_pi = -(torch.min(clip_1, clip_2)).mean()
+        # kl leiber
+        approx_kl = (old_log_probs - curr_log_probs).mean().item()
         # calc clip frac
-        self.clip_fraction = (abs((ratio - 1.0)) >
+        clip_frac = (abs((ratio - 1.0)) >
                               clip_eps).to(torch.float).mean()
-        return policy_loss.mean()  # return mean
+        pi_info = dict(kl=approx_kl, cf=clip_frac)
+        return loss_pi, pi_info
 
 
 ####################
@@ -212,7 +219,7 @@ class PPO_PolicyGradient:
         :param n_optepochs: Number of epoch when optimizing the surrogate loss
         :param gamma: Discount factor
         :param gae_lambda: Factor for trade-off of bias vs variance for Generalized Advantage Estimator
-        :param epsilon: Clipping parameter, it can be a function of the current progress
+        :param clip_ratio: Clipping parameter, it can be a function of the current progress
         remaining (from 1 to 0).
         :param normalize_advantage: Whether to normalize or not the advantage
         :param normalize_returns: Whether to normalize or not the return
@@ -236,7 +243,7 @@ class PPO_PolicyGradient:
                  learning_rate_v=1e-3,
                  gae_lambda=0.95,
                  gamma=0.99,
-                 epsilon=0.2,
+                 clip_ratio=0.2,
                  adam_eps=1e-5,
                  momentum=0.9,
                  adam=True,
@@ -245,6 +252,7 @@ class PPO_PolicyGradient:
                  stats_plotter=None,
                  log_video=False,
                  log_video_steps=100,
+                 log_drone_val=True,
                  render_steps=10,
                  render_video=False,
                  device='cpu',
@@ -262,13 +270,13 @@ class PPO_PolicyGradient:
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.total_training_steps = total_training_steps
-        self.max_trajectory_size = max_trajectory_size
+        self.max_ep_len = max_trajectory_size
         self.n_rollout_steps = n_rollout_steps
         self.n_optepochs = n_optepochs
         self.learning_rate_p = learning_rate_p
         self.learning_rate_v = learning_rate_v
         self.gamma = gamma
-        self.epsilon = epsilon
+        self.clip_ratio = clip_ratio
         self.adam_eps = adam_eps
         self.gae_lambda = gae_lambda
         self.momentum = momentum
@@ -291,36 +299,27 @@ class PPO_PolicyGradient:
         # track video of gym
         self.log_video = log_video
         self.log_video_steps = log_video_steps
+        self.log_drone_val = log_drone_val
 
         # keep track of rewards per episode
         self.ep_returns = deque(maxlen=max_trajectory_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
-        self.stats_data = {
-            'experiment': [],
-            'timestep': [],
-            'mean episodic runtime': [],
-            'mean episodic length': [],
-            'eval episodes': [],
-            'mean episodic returns': [],
-            'min episodic returns': [],
-            'max episodic returns': [],
-            'std episodic returns': [],
+        self.stats_data = {  # logged for CSV file
             'episodes': [],
-            'training time': []
+            'training time': [],         # total training time
+            'eval episodes': [], 
+            'experiment': [],            # experiment name
+            'timestep': [],              # timesteps 
+            'mean episodic runtime': [], # mean runtime per episode
+            'mean episodic length': [],  # mean length per episode
+            'mean episodic returns': [], # mean returns per episode
+            'min episodic returns': [],  # avg. min return per episode
+            'max episodic returns': [],  # avg. max return per episode
+            'std episodic returns': []   # avg. std per episode
         }
-        self.stats_drone_data = {
-            "dist_to_target": [],
-            "dist_to_start_point": [],
-            "x_position": [],
-            "y_position": [],
-            "z_position": [],
-            "x_velocity": [],
-            "y_velocity": [],
-            "z_velocity": [],
-            "roll": [],
-            "pitch": [],
-        }
+        self.stats_drone_data = { "dist_to_start_point": [], "y_position": [], 
+                                  "x_velocity": [], "y_velocity": [], "z_velocity": []}
 
         # add net for actor and critic
         # Setup Policy Network (Actor) - (policy-based method) "How the agent behaves"
@@ -345,8 +344,7 @@ class PPO_PolicyGradient:
         # Multivariate Normal Distribution Lecture 15.7 (Andrew Ng) https://www.youtube.com/watch?v=JjB58InuTqM
         # fixes the detection of outliers, allows to capture correlation between features
         # https://discuss.pytorch.org/t/understanding-log-prob-for-normal-distribution-in-pytorch/73809
-        # 1) Use Normal distribution for continuous space
-        # query Policy Network (Actor) for mean action
+        # 1) Use Normal distribution for continuous space when querying Policy Network (Actor) for mean action
         action_prob = self.policy_net(obs)
         cov_matrix = torch.diag(torch.full(
             size=(self.out_dim,), fill_value=0.5))
@@ -390,7 +388,7 @@ class PPO_PolicyGradient:
         action, log_prob, entropy = self.get_random_action(action_dist)
         return action.detach().numpy(), log_prob.detach().numpy(), entropy.detach().numpy()
 
-    def advantage_estimate(self, batch_rewards, values, normalized_adv=False, normalized_ret=False):
+    def advantage_estimate(self, ep_rewards, values, normalized_adv=False, normalized_ret=False):
         """ Calculating advantage estimate using TD error (Temporal Difference Error).
             TD Error can be used as an estimator for Advantage function,
             - bias-variance: TD has low variance, but IS biased
@@ -399,7 +397,7 @@ class PPO_PolicyGradient:
         # Step 4: Calculate returns
         advantages = []
         cum_returns = []
-        for rewards in reversed(batch_rewards):  # reversed order
+        for rewards in reversed(ep_rewards):  # reversed order
             for reward in reversed(rewards):
                 cum_returns.insert(0, reward)  # reverse it again
         cum_returns = torch.tensor(
@@ -413,7 +411,7 @@ class PPO_PolicyGradient:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def advantage_reinforce(self, batch_rewards, normalized_adv=False, normalized_ret=False):
+    def advantage_reinforce(self, ep_rewards, normalized_adv=False, normalized_ret=False):
         """ Advantage Reinforce 
             A(s_t, a_t) = G(t)
             - G(t) = total disounted reward
@@ -426,7 +424,7 @@ class PPO_PolicyGradient:
         # G(t) is the total disounted reward
         # return value: G(t) = R(t) + gamma * R(t-1)
         cum_returns = []
-        for rewards in reversed(batch_rewards):  # reversed order
+        for rewards in reversed(ep_rewards):  # reversed order
             discounted_reward = 0
             for reward in reversed(rewards):
                 # R + discount * estimated return from the next step taking action a'
@@ -446,7 +444,7 @@ class PPO_PolicyGradient:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def advantage_actor_critic(self, batch_rewards, values, normalized_adv=False, normalized_ret=False):
+    def advantage_actor_critic(self, ep_rewards, values, normalized_adv=False, normalized_ret=False):
         """ Advantage Actor-Critic
             Discounted return: G(t) = R(t) + gamma * R(t-1)
             Advantage: delta = G(t) - V(s_t)
@@ -456,7 +454,7 @@ class PPO_PolicyGradient:
         # G(t) is the total disounted reward
         # return value: G(t) = R(t) + gamma * R(t-1)
         cum_returns = []
-        for rewards in reversed(batch_rewards):  # reversed order
+        for rewards in reversed(ep_rewards):  # reversed order
             discounted_reward = 0
             for reward in reversed(rewards):
                 # R + discount * estimated return from the next step taking action a'
@@ -475,7 +473,7 @@ class PPO_PolicyGradient:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def advantage_TD_actor_critic(self, batch_rewards, values, normalized_adv=False, normalized_ret=False):
+    def advantage_TD_actor_critic(self, ep_rewards, values, normalized_adv=False, normalized_ret=False):
         """ Advantage TD Actor-Critic 
             TD Error = δ_t = r_t + γ * V(s_t+1) − V(s_t)
             TD Error is used as an estimator for the advantage function
@@ -484,7 +482,7 @@ class PPO_PolicyGradient:
         # Step 4: Calculate returns
         advantages = []
         cum_returns = []
-        for rewards in reversed(batch_rewards):  # reversed order
+        for rewards in reversed(ep_rewards):  # reversed order
             for reward in reversed(rewards):
                 cum_returns.insert(0, reward)  # reverse it again
         cum_returns = torch.tensor(
@@ -506,7 +504,7 @@ class PPO_PolicyGradient:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def generalized_advantage_estimate(self, batch_rewards, values, normalized_adv=False, normalized_ret=False):
+    def generalized_advantage_estimate(self, ep_rewards, values, normalized_adv=False, normalized_ret=False):
         """ The Generalized Advanatage Estimate
             δ_t = r_t + γ * V(s_t+1) − V(s_t)
             A_t = δ_t + γ * λ * A(t+1)
@@ -516,7 +514,7 @@ class PPO_PolicyGradient:
         advantages = []
         cum_returns = []
         # Step 4: Calculate returns
-        for rewards in reversed(batch_rewards):  # reversed order
+        for rewards in reversed(ep_rewards):  # reversed order
             discounted_reward = 0
             for reward in reversed(rewards):
                 # R + discount * estimated return from the next step taking action a'
@@ -547,7 +545,7 @@ class PPO_PolicyGradient:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def generalized_advantage_estimate_2(self, obs, next_obs, batch_rewards, dones, normalized_adv=False, normalized_ret=False):
+    def generalized_advantage_estimate_2(self, obs, next_obs, ep_rewards, dones, normalized_adv=False, normalized_ret=False):
         """ Generalized Advantage Estimate calculation
             - GAE defines advantage as a weighted average of A_t
             - advantage measures if an action is better or worse than the policy's default behavior
@@ -562,7 +560,7 @@ class PPO_PolicyGradient:
         returns = []
 
         # STEP 4: Calculate cummulated reward
-        for rewards in reversed(batch_rewards):
+        for rewards in reversed(ep_rewards):
             prev_advantage = 0
             returns_current = ns_values[-1]  # V(s_t+1)
             for i in reversed(range(len(rewards))):
@@ -595,30 +593,33 @@ class PPO_PolicyGradient:
         eps = np.finfo(np.float32).eps.item()
         return (returns - returns.mean()) / (returns.std() + eps)
 
-    def finish_episode(self):
-        pass
+    def finish_episode(self, info):
+        self.stats_drone_data['dist_to_start_point'].append(info['dist_to_start_point'])
+        self.stats_drone_data['x_velocity'].append(info['x_velocity'])
+        self.stats_drone_data['y_velocity'].append(info['y_velocity'])
+        self.stats_drone_data['z_velocity'].append(info['z_velocity'])
+        self.stats_drone_data['y_position'].append(info['y_position'])
 
     def collect_rollout(self, n_rollout_steps=2048):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)
            A typical rollout length - 2048 t0 4096
         """
-
         t_step, rewards, frames = 0, [], deque(maxlen=24)  # 4 fps - 6 sec
 
         # log time
         episode_time = []
 
         # collect trajectories
-        batch_obs = []
-        batch_nextobs = []
-        batch_actions = []
-        batch_action_probs = []
-        batch_dones = []
-        batch_rewards = []
-        batch_lens = []
+        episode_obs = []
+        episode_nextobs = []
+        episode_actions = []
+        episode_action_probs = []
+        episode_dones = []
+        episode_rewards = []
+        episode_lens = []
 
         # Run Monte Carlo simulation for n timesteps per batch
-        logging.info(f"Collecting trajectories for {n_rollout_steps} steps.")
+        logging.info(f"Collecting trajectories for {n_rollout_steps} episodes.")
         while t_step < n_rollout_steps:
 
             # rewards collected
@@ -627,13 +628,13 @@ class PPO_PolicyGradient:
 
             # measure time elapsed for one episode
             # torch.cuda.synchronize()
-            start_epoch = time.time()
+            start_time = time.time()
 
-            # Run episode for a fixed amount of timesteps
+            # Run episode for a fixed amount of steps
             # to keep rollout size fixed and episodes independent
-            for t in range(0, self.max_trajectory_size):
+            for t_batch in range(0, self.max_ep_len):
                 # render gym envs
-                if self.render_video and t % self.render_steps == 0:
+                if self.render_video and t_batch % self.render_steps == 0:
                     frames.append(self.env.render(mode="rgb_array"))
 
                 t_step += 1
@@ -647,61 +648,56 @@ class PPO_PolicyGradient:
 
                 # STEP 3: collecting set of trajectories D_k by running action
                 # that was sampled from policy in environment
-                __obs, reward, done, truncated = self.env.step(action)
+                __obs, reward, done, info = self.env.step(action)
 
                 # collection of trajectories in batches
-                batch_obs.append(obs)
-                batch_nextobs.append(__obs)
-                batch_actions.append(action)
-                batch_action_probs.append(log_probability)
+                episode_obs.append(obs)
+                episode_nextobs.append(__obs)
+                episode_actions.append(action)
+                episode_action_probs.append(log_probability)
                 rewards.append(reward)
-                batch_dones.append(done)
+                episode_dones.append(done)
 
                 obs = __obs
 
-                try:
-                    self.stats_drone_data['dist_to_target'].append(truncated['dist_to_target'])  # collect truncated objects
-                    self.stats_drone_data['dist_to_start_point'].append(truncated['dist_to_start_point'])
-                    self.stats_drone_data['z_velocity'].append(truncated['z_velocity'])
-                    self.stats_drone_data['y_velocity'].append(truncated['y_velocity'])
-                    self.stats_drone_data['y_position'].append(truncated['y_position'])
-                except:
-                    logging.warn(f"Failed to collect {truncated}.")
-
+                epoch_ended = t_batch == (self.max_ep_len-1)
                 # break out of loop if episode is terminated
-                if done or truncated:
+                if done or epoch_ended:
+                    # log info object after episode
+                    self.finish_episode(info)
+                    obs = self.env.reset()
                     break
 
             # stop time per episode
             # Waits for everything to finish running
             # torch.cuda.synchronize()
-            end_epoch = time.time()
-            time_elapsed = end_epoch - start_epoch
+            end_time = time.time()
+            time_elapsed = end_time - start_time
             episode_time.append(time_elapsed)
 
-            batch_lens.append(t + 1)  # as we started at 0
-            batch_rewards.append(rewards)
+            episode_lens.append(t_batch + 1)  # as we started at 0
+            episode_rewards.append(rewards)
 
         # convert trajectories to torch tensors
-        obs = torch.tensor(np.array(batch_obs),
+        obs = torch.tensor(np.array(episode_obs),
                            device=self.device, dtype=torch.float)
-        next_obs = torch.tensor(np.array(batch_nextobs),
+        next_obs = torch.tensor(np.array(episode_nextobs),
                                 device=self.device, dtype=torch.float)
-        actions = torch.tensor(np.array(batch_actions),
+        actions = torch.tensor(np.array(episode_actions),
                                device=self.device, dtype=torch.float)
         action_log_probs = torch.tensor(
-            np.array(batch_action_probs), device=self.device, dtype=torch.float)
-        dones = torch.tensor(np.array(batch_dones),
+            np.array(episode_action_probs), device=self.device, dtype=torch.float)
+        dones = torch.tensor(np.array(episode_dones),
                              device=self.device, dtype=torch.float)
 
-        return obs, next_obs, actions, action_log_probs, dones, batch_rewards, batch_lens, np.array(episode_time), frames
+        return obs, next_obs, actions, action_log_probs, dones, episode_rewards, episode_lens, np.array(episode_time), frames
 
-    def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
+    def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, clip_ratio):
         """Calculate loss and update weights of both networks."""
         # loss of the policy network
         self.policy_net_optim.zero_grad()  # reset optimizer
-        policy_loss = self.policy_net.loss(
-            advantages, batch_log_probs, curr_log_probs, epsilon)
+        policy_loss, policy_info = self.policy_net.loss(
+            advantages, batch_log_probs, curr_log_probs, clip_ratio)
         policy_loss.backward()  # backpropagation
         self.policy_net_optim.step()  # single optimization step (updates parameter)
 
@@ -711,7 +707,7 @@ class PPO_PolicyGradient:
         value_loss.backward()
         self.value_net_optim.step()
 
-        return policy_loss, value_loss
+        return policy_loss, policy_info, value_loss
 
     def learn(self):
         """"""
@@ -741,13 +737,12 @@ class PPO_PolicyGradient:
             ), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
 
             # update network params
-            logging.info(
-                f"Updating network parameter for {self.n_optepochs} epochs.")
+            logging.info(f"Updating network parameter for {self.n_optepochs} epochs.")
             for _ in range(self.n_optepochs):
                 # STEP 6-7: calculate loss and update weights
                 values, curr_log_probs, _ = self.get_values(obs, actions)
-                policy_loss, value_loss = self.train(
-                    values, cum_returns, advantages, batch_log_probs, curr_log_probs, self.epsilon)
+                policy_loss, policy_info, value_loss = self.train(
+                    values, cum_returns, advantages, batch_log_probs, curr_log_probs, self.clip_ratio)
 
                 policy_losses.append(policy_loss.detach().numpy())
                 value_losses.append(value_loss.detach().numpy())
@@ -756,6 +751,8 @@ class PPO_PolicyGradient:
             done_so_far += 1
 
             time_so_far = time.time() - start_training_time
+            if self.log_drone_val:
+                self.log_drone_stats()
 
             # log all statistical values to CSV
             self.log_stats(policy_losses, value_losses,
@@ -805,6 +802,7 @@ class PPO_PolicyGradient:
                                                    fps=4, format="gif"), "step": done_so_far
                     })
 
+
         # Finalize and plot stats
         if self.stats_plotter:
             try:
@@ -842,23 +840,10 @@ class PPO_PolicyGradient:
         video_path = os.path.join(path, filename)
         anim.save(video_path, writer='imagemagick', fps=60)
 
-    def log_stats(self, p_losses, v_losses, batch_return, batch_lens, training_steps, time, time_so_far, done_so_far, exp_name='experiment', smoothing=None):
+    def log_stats(self, p_losses, v_losses, batch_return, ep_lens, training_steps, time, time_so_far, done_so_far, exp_name='experiment', smoothing=None):
         """Calculate stats and log to W&B, CSV, logger """
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
-
-        # calc drone stats
-        dist_origin = np.array(self.stats_drone_data['dist_to_start_point'])
-        dist_gate = np.array(self.stats_drone_data['dist_to_target'])
-        z_vel = np.array(self.stats_drone_data['z_velocity'])
-        y_vel = np.array(self.stats_drone_data['y_velocity'])
-        y_pos = np.array(self.stats_drone_data['y_position'])
-
-        mean_drone_dist_origin = round(np.mean(dist_origin), 6)
-        mean_drone_dist_gate = round(np.mean(dist_gate), 6)
-        mean_drone_y_pos = round(np.mean(y_pos), 6)
-        mean_drone_y_vel = round(np.mean(y_vel), 6)
-        mean_drone_z_vel = round(np.mean(z_vel), 6)
 
         # calculate stats
         mean_p_loss = round(np.mean([np.sum(loss) for loss in p_losses]), 6)
@@ -867,7 +852,7 @@ class PPO_PolicyGradient:
         # Calculate the stats of an episode
         cum_ret = [np.sum(ep_rews) for ep_rews in batch_return]
         mean_ep_time = round(np.mean(time), 6)
-        mean_ep_len = round(np.mean(batch_lens), 6)
+        mean_ep_len = round(np.mean(ep_lens), 6)
 
         # use gaussian smoothing
         if smoothing:
@@ -905,13 +890,6 @@ class PPO_PolicyGradient:
             'train/mean episode runtime': mean_ep_time,
             'train/mean episode length': mean_ep_len,
             'train/episodes': done_so_far,
-
-            # logging drone truncated per run
-            'drone/dist to start': mean_drone_dist_origin,
-            'drone/dist to target': mean_drone_dist_gate,
-            'drone/y position': mean_drone_y_pos,
-            'drone/z velocity': mean_drone_z_vel,
-            'drone/y velocity': mean_drone_y_vel,
         })
 
         logging.info('\n')
@@ -924,7 +902,26 @@ class PPO_PolicyGradient:
         logging.info('-----------------------------------------------------')
         logging.info('\n')
 
-        if bool(self.stats_drone_data):  # check if empty
+    def log_drone_stats(self):
+        # finally log collected drone values
+
+        dist_origin = np.array(self.stats_drone_data['dist_to_start_point'])
+        x_vel = np.array(self.stats_drone_data['x_velocity'])
+        y_vel = np.array(self.stats_drone_data['y_velocity'])
+        z_vel = np.array(self.stats_drone_data['z_velocity'])
+        y_pos = np.array(self.stats_drone_data['y_position'])
+
+        wandb.log({
+                # logging drone truncated per run
+                    'drone/dist to start': np.mean(dist_origin),
+                    'drone/y position': np.mean(y_pos),
+                    'drone/x velocity': np.mean(x_vel),
+                    'drone/y velocity': np.mean(y_vel),
+                    'drone/z velocity': np.mean(z_vel),
+                })
+
+        if self.stats_drone_data:
+            # remove old values
             for value in self.stats_drone_data.values():
                 del value[:]
 
@@ -944,7 +941,7 @@ def arg_parser():
     parser.add_argument("--project-name",   type=str, default='OpenAIGym-PPO', help="the name of this project") 
     parser.add_argument("--gym-id",         type=str, default="Pendulum-v1", help="the id of the gym environment")
     parser.add_argument("--learning-rate",  type=float, default=3e-4, help="the learning rate of the optimizer")
-    parser.add_argument("--seed",           type=int, default=1, help="seed of the experiment")
+    parser.add_argument("--seed",           type=int, default=1, help="seed of the random number generators")
     parser.add_argument("--total-timesteps", type=int, default=1_000_000, help="total timesteps of the experiments")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda",           type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
@@ -953,20 +950,19 @@ def arg_parser():
     args = parser.parse_args()
     return args
 
-def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=42):
+def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=42, low_range=-1, up_range=1):
     env = gym.make(env_id)
     # gym wrapper
     if gym_wrappers:
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, low_range, up_range))
         env = gym.wrappers.NormalizeReward(env)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-            # seed env for reproducability
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, low_range, up_range))
+    # seed env for reproducability
     env.seed(seed)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
-
     # check
     check_env(env,
               warn=True,
@@ -975,7 +971,7 @@ def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=42):
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     """ Initialize the hidden layers with orthogonal initialization
-        Engstrom, Ilyas, et al., (2020)
+       E, (2020)
     """
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -1008,12 +1004,12 @@ class PPOTrainer:
                 total_training_steps=10_000,
                 max_trajectory_size=1024,
                 n_rollout_steps=2048,
-                n_optepochs=32,
+                n_optepochs=10,
                 learning_rate_p=1e-4,
                 learning_rate_v=1e-3,
                 gae_lambda=0.95,
                 gamma=0.99,
-                epsilon=0.2,
+                clip_ratio=0.2,
                 adam_eps=1e-5,
                 momentum=0.9,
                 adam=True,
@@ -1036,14 +1032,14 @@ class PPOTrainer:
 
         # hyperparam
         self.total_training_steps = total_training_steps
-        self.max_trajectory_size = max_trajectory_size
+        self.max_ep_len = max_trajectory_size
         self.n_rollout_steps = n_rollout_steps
         self.n_optepochs = n_optepochs
         self.learning_rate_p = learning_rate_p
         self.learning_rate_v =learning_rate_v
         self.gae_lambda = gae_lambda
         self.gamma = gamma
-        self.epsilon = epsilon
+        self.clip_ratio = clip_ratio
         self.adam_eps = adam_eps
         self.momentum = momentum
         self.adam = adam
@@ -1063,19 +1059,20 @@ class PPOTrainer:
         self.log_video_steps = log_video_steps
 
         # other
-        self.deterministic = deterministic,
+        self.deterministic = deterministic
         self.seed = seed
         self.device = device
 
         # set everything up
-        self.setup_env()
+        self.setup_env(seed)
         self.setup_logging()
         self.setup_wb()
 
-    def setup_env(self):
-        # seeding
-        torch.manual_seed(self.seed)
-        np.random.seed(self.seed)
+    def setup_env(self, seed=42):
+        # seeding for reproducability
+        random.seed(seed)
+        torch.manual_seed(seed)
+        np.random.seed(seed)
         torch.backends.cudnn.deterministic = True # self.deterministic
 
         # get dimensions of obs (what goes in?)
@@ -1122,7 +1119,7 @@ class PPOTrainer:
                     'env name': self.env_name,
                     'env number': 1, # only single env
                     'total_training_steps': self.total_training_steps,
-                    'max sampled trajectories': self.max_trajectory_size,
+                    'max sampled trajectories': self.max_ep_len,
                     'batches per episode': self.n_rollout_steps,
                     'number of epochs for update': self.n_optepochs,
                     'input layer size': self.obs_dim,
@@ -1135,7 +1132,7 @@ class PPOTrainer:
                     'learning rate (value net)': self.learning_rate_v,
                     'epsilon (adam optimizer)': self.adam_eps,
                     'gamma (discount)': self.gamma,
-                    'epsilon (clip_range)': self.epsilon,
+                    'clip_ratio (clipping policy objective)': self.clip_ratio,
                     'gae lambda (GAE)': self.gae_lambda,
                     'normalize advantage': self.normalize_advantage,
                     'normalize return': self.normalize_return,
@@ -1155,14 +1152,14 @@ class PPOTrainer:
                 self.obs_dim,
                 self.act_dim,
                 total_training_steps=self.total_training_steps,
-                max_trajectory_size=self.max_trajectory_size,
+                max_trajectory_size=self.max_ep_len,
                 n_rollout_steps=self.n_rollout_steps,
                 n_optepochs=self.n_optepochs,
                 learning_rate_p=self.learning_rate_p,
                 learning_rate_v=self.learning_rate_v,
                 gae_lambda=self.gae_lambda,
                 gamma=self.gamma,
-                epsilon=self.epsilon,
+                clip_ratio=self.clip_ratio,
                 adam_eps=self.adam_eps,
                 momentum=self.momentum,
                 adam=self.adam,
@@ -1205,9 +1202,9 @@ class PPOTuner:
                 'learning rate (policy net)': [1e-5, 1e-4, 1e-3, 1e-2],
                 'learning rate (value net)': [1e-5, 1e-4, 1e-3, 1e-2],
                 'gamma (discount)': [0.95, 0.96, 0.97, 0.98, 0.99],
-                'epsilon (clip_range)': [0.1, 0.2, 0.22, 0.24,0.3],
+                'clip_ratio (clip_ratio)': [0.1, 0.2, 0.22, 0.24,0.3],
                 'gae lambda (GAE)': [0.9, 0.93, 0.95, 0.96, 0.97, 0.99, 1.0],
-                'epsilon (adam optimizer)': [1e-9, 1e-8, 1e-7, 1e-6, 1e-5],
+                'clip_ratio (adam optimizer)': [1e-9, 1e-8, 1e-7, 1e-6, 1e-5],
                 'number of epochs for update': [8, 16, 32, 64, 128, 256],
                 'max sampled trajectories': [32, 64, 128, 256, 512, 1024, 2048, 4096]
         }
