@@ -33,6 +33,14 @@ import wandb
 # logging
 from gym_pybullet_drones.examples.stats_logger import CSVWriter, StatsPlotter
 
+# Hyperparameter
+DEFAULT_LR_P= 1e-4                        # learning rate for policy network
+DEFAULT_LR_V = 1e-3                       # learning rate for value network
+DEFAULT_ADAM_EPSILON = 1e-7               # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
+DEFAULT_NORM_ADV = False                  # wether to normalize the advantage estimate
+DEFAULT_NORM_RET = True                   # wether to normalize the return function
+DEFAULT_ADV_FUNC = 'gae'                  # wether to take gae, ac, td_ac or reinforce for usage of advantage estimate
+
 # Paths and other constants
 MODEL_PATH = './models/'
 LOG_PATH = './log/'
@@ -247,6 +255,9 @@ class PPO_PolicyGradient:
                  adam_eps=1e-5,
                  momentum=0.9,
                  adam=True,
+                 advantage='gae',
+                 normalize_adv=False,
+                 normalize_ret=False,
                  save_model=10,
                  csv_writer=None,
                  stats_plotter=None,
@@ -258,9 +269,6 @@ class PPO_PolicyGradient:
                  device='cpu',
                  exp_path='./log/',
                  exp_name='PPO_V2_experiment',
-                 advantage_type='gae',
-                 normalize_adv=False,
-                 normalize_ret=False,
                  seed=0) -> None:
 
         # environment
@@ -281,7 +289,7 @@ class PPO_PolicyGradient:
         self.gae_lambda = gae_lambda
         self.momentum = momentum
         self.adam = adam
-        self.advantage_type = advantage_type
+        self.advantage = advantage
 
         # logging and rendering
         self.render_steps = render_steps
@@ -308,12 +316,12 @@ class PPO_PolicyGradient:
         self.stats_data = {  # logged for CSV file
             'episodes': [],
             'training time': [],         # total training time
-            'eval episodes': [], 
+            'length per episode': [],    # length of an episode
             'experiment': [],            # experiment name
             'timestep': [],              # timesteps 
-            'mean episodic runtime': [], # mean runtime per episode
-            'mean episodic length': [],  # mean length per episode
-            'mean episodic returns': [], # mean returns per episode
+            'mean episodic runtime': [], # avg. runtime per episode
+            'mean episodic length': [],  # avg. length per episode
+            'mean episodic returns': [], # avg. returns per episode
             'min episodic returns': [],  # avg. min return per episode
             'max episodic returns': [],  # avg. max return per episode
             'std episodic returns': []   # avg. std per episode
@@ -665,7 +673,6 @@ class PPO_PolicyGradient:
                 if done or epoch_ended:
                     # log info object after episode
                     self.finish_episode(info)
-                    obs = self.env.reset()
                     break
 
             # stop time per episode
@@ -729,12 +736,18 @@ class PPO_PolicyGradient:
 
             # STEP 4-5: Calculate cummulated reward and advantage at timestep t_step
             values, _, _ = self.get_values(obs, actions)
+            
             # Calculate advantage function
-            # advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(
-            ), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            if self.advantage == 'gae':
+                advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            elif self.advantage == 'reinforce':
+                advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            elif self.advantage == 'ac':
+                advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            elif self.advantage == 'td_ac':
+                advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            else:
+                AssertionError('Incorrect advantage function selected! select --advantage [gae, reinforce, ac, td_ac]') 
 
             # update network params
             logging.info(f"Updating network parameter for {self.n_optepochs} epochs.")
@@ -862,7 +875,7 @@ class PPO_PolicyGradient:
         mean_ep_ret = round(np.mean(cum_ret), 6)
         max_ep_ret = round(np.max(cum_ret), 6)
         min_ep_ret = round(np.min(cum_ret), 6)
-        # standard deviation (spred of distribution)
+        # standard deviation (spread of distribution)
         std_ep_rew = round(np.std(cum_ret), 6)
 
         # Log stats to CSV file
@@ -874,7 +887,7 @@ class PPO_PolicyGradient:
         self.stats_data['max episodic returns'].append(max_ep_ret)
         self.stats_data['std episodic returns'].append(std_ep_rew)
         self.stats_data['mean episodic runtime'].append(mean_ep_time)
-        self.stats_data['eval episodes'].append(len(cum_ret))
+        self.stats_data['length per episode'].append(len(cum_ret))
         self.stats_data['timestep'].append(training_steps)
         self.stats_data['training time'].append(time_so_far)
 
@@ -933,22 +946,34 @@ def arg_parser():
     parser = argparse.ArgumentParser()
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video",          type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, capture video of run")
-    parser.add_argument("--train",          type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, run model in training mode")
-    parser.add_argument("--test",           type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, run model in testing mode")
-    parser.add_argument("--hyperparam",     type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, log hyperparameters")
-    parser.add_argument("--exp-name",       type=str, default=os.path.basename(__file__).rstrip(".py"), help="the name of this experiment")
-    parser.add_argument("--project-name",   type=str, default='OpenAIGym-PPO', help="the name of this project") 
-    parser.add_argument("--gym-id",         type=str, default="Pendulum-v1", help="the id of the gym environment")
-    parser.add_argument("--learning-rate",  type=float, default=3e-4, help="the learning rate of the optimizer")
-    parser.add_argument("--seed",           type=int, default=1, help="seed of the random number generators")
-    parser.add_argument("--total-timesteps", type=int, default=1_000_000, help="total timesteps of the experiments")
-    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--cuda",           type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
+    parser.add_argument("--video",                  type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, capture video of run")
+    parser.add_argument("--train",                  type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, run model in training mode")
+    parser.add_argument("--test",                   type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=False, help="if toggled, run model in testing mode")
+    parser.add_argument("--hyperparam",             type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="if toggled, log hyperparameters")
+    parser.add_argument("--exp_name",               type=str, default=os.path.basename(__file__).rstrip(".py"), help="the name of this experiment")
+    parser.add_argument("--project-name",           type=str, default='OpenAIGym-PPO', help="the name of this project") 
+    parser.add_argument("--env_id",                 type=str, default="Pendulum-v1", help="the id of the gym environment")
+    parser.add_argument("--learning-rate",          type=float, default=3e-4, help="the learning rate of the optimizer")
+    parser.add_argument("--learning_rate_v",        type=float,                         default=DEFAULT_LR_V,               help="the learning rate of the value network")
+    parser.add_argument("--learning_rate_p",        type=float,                         default=DEFAULT_LR_P,               help="the learning rate of the policy network")
+    parser.add_argument("--adam_epsilonilon",       type=float,                         default=DEFAULT_ADAM_EPSILON,       help="the learning rate of the optimizer")
+    parser.add_argument("--advantage",              type=str,                           default=DEFAULT_ADV_FUNC,           help="the advantage function to be used (gae, ac, td_ac, reinforce") 
+    parser.add_argument("--normalize_adv",          type=lambda x: bool(strtobool(x)),  default=DEFAULT_NORM_ADV,           nargs="?", const=False, help="if toggled, normalize advantage estimate")
+    parser.add_argument("--normalize_ret",          type=lambda x: bool(strtobool(x)),  default=DEFAULT_NORM_RET,           nargs="?", const=False, help="if toggled, normalize return")
+    parser.add_argument("--seed",                   type=int, default=1, help="seed of the random number generators")
+    parser.add_argument("--total_timesteps",        type=int, default=1_000_000, help="total timesteps of the experiments")
+    parser.add_argument("--torch_deterministic",    type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
+    parser.add_argument("--cuda",                   type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
 
     # Parse arguments if they are given
     args = parser.parse_args()
     return args
+
+
+
+####################
+####################
+
 
 def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=42, low_range=-1, up_range=1):
     env = gym.make(env_id)
@@ -1173,7 +1198,7 @@ class PPOTrainer:
                 device=self.device,
                 exp_path=self.exp_dir,
                 exp_name=self.exp_name,
-                advantage_type=self.advantage_type,
+                advantage=self.advantage_type,
                 normalize_adv=self.normalize_advantage,
                 normalize_ret=self.normalize_return)
         return agent
@@ -1189,6 +1214,9 @@ class PPOTrainer:
         policy_net = PolicyNet_MLP(self.obs_dim, self.act_dim)
         policy_net = load_model(checkpoints, policy_net, self.device)
         return policy_net
+
+####################
+####################
 
 
 class PPOTuner:

@@ -16,6 +16,7 @@ reinforcement learning libraries `stable-baselines3` and `ray[rllib]`.
 It is not meant as a good/effective learning example.
 
 """
+from distutils.util import strtobool
 import os
 import platform
 import subprocess
@@ -62,7 +63,11 @@ DEFAULT_ENV = 'takeoff' #"takeoff", "hover", 'flythrugate'
 DEFAULT_OBS = ObservationType('kin')
 DEFAULT_ACT = ActionType('pid') # ActionType('one_d_rpm') - 'rpm'for each rotor being independently learned
 DEFAULT_RLLIB = True
+# PPO v2 specific
 DEFAULT_ALGO = 'ppo_v2'
+DEFAULT_NORM_ADV = False                  # wether to normalize the advantage estimate
+DEFAULT_NORM_RET = True                   # wether to normalize the return function
+DEFAULT_ADV_FUNC = 'gae'                  # wether to take gae, ac, td_ac or reinforce for usage of advantage estimate
 # drones
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
@@ -97,6 +102,9 @@ def run(env_id=DEFAULT_ENV,
         algo=DEFAULT_ALGO,
         obs=DEFAULT_OBS,
         act=DEFAULT_ACT,
+        advantage=DEFAULT_ADV_FUNC,
+        normalize_adv=DEFAULT_NORM_ADV,
+        normalize_ret=DEFAULT_NORM_RET,
         train_steps=DEFAULT_TRAINING_STEPS,
         drone=DEFAULT_DRONES,
         num_drones=DEFAULT_NUM_DRONES,
@@ -402,6 +410,9 @@ def arg_parser():
     parser.add_argument('--record_video',       default=DEFAULT_RECORD_VIDEO,       type=str2bool,                                          help='Whether to record a video (default: False)', metavar='')
     parser.add_argument('--output_folder',      default=DEFAULT_OUTPUT_FOLDER,      type=str,                                               help='Folder where to save logs (default: "results")', metavar='')
     parser.add_argument('--algo',               default=DEFAULT_ALGO,               choices=['ppo_v2', 'ppo_sb3', 'ppo_rllib'],             help='Select an algorithm to be used, either custom ppo or stable-baseline3 (ppo_v2, ppo_sb3, ppo_rllib)')
+    parser.add_argument("--advantage",          default=DEFAULT_ADV_FUNC,           choices=['gae', 'ac', 'td_ac', 'reinforce'],            help="the advantage function to be used (gae, ac, td_ac, reinforce") 
+    parser.add_argument("--normalize_adv",      default=DEFAULT_NORM_ADV,           type=bool,                                              nargs="?", const=False, help="if toggled, normalize advantage estimate")
+    parser.add_argument("--normalize_ret",      default=DEFAULT_NORM_RET,           type=bool,                                              nargs="?", const=False, help="if toggled, normalize return")
     parser.add_argument('--env_id',             default=DEFAULT_ENV,                choices=['takeoff', 'hover', 'flythrugate', 'tune'],    help='Select an environment to train on (hover, takeoff, flythrugate)')
     parser.add_argument('--obs',                default=DEFAULT_OBS,                type=ObservationType,                                   help='Observation space (default: kin)', metavar='')
     parser.add_argument('--act',                default=DEFAULT_ACT,                type=ActionType,                                        help='Action space (default: one_d_rpm)', metavar='')

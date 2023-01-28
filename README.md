@@ -68,6 +68,7 @@ Select a training from scratch with optional flags (--algo, --train_steps, --env
 [2] Training
 
 Run training with PPO
+- ```$ cd src/ppo```
 - ```python ppo_continuous.py --run_train True```
 
 [3] Evaluation
