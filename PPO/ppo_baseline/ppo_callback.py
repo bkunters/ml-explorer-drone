@@ -14,7 +14,7 @@ class TrainingCallback(BaseCallback):
         super(TrainingCallback, self).__init__(verbose)
         self.n_ep_rewards = []
         self.max_batch_size = 512
-        self.n_rollout_steps = 2048
+        self.n_rollout_steps = 2200
         self.t_episode = 0
         self.step = 0
         self.mean_rewards = 0
@@ -60,7 +60,7 @@ config = {
     "policy_type": "MlpPolicy",
     "total_timesteps": 5_000_000,
     "env_name": "Pendulum-v1",
-    "n_steps": 2048,
+    "n_steps": 2200,
 }
 
 run = wandb.init(
