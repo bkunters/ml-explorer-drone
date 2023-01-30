@@ -866,6 +866,7 @@ class PPO_PolicyGradient:
         # Last 100 values
         if moving_avg:
             ep_return = ep_return[-100:]
+
         # Calculate the stats of an episode
         cum_ret = [np.sum(ep_rews) for ep_rews in ep_return]
         mean_ep_time = round(np.mean(ep_time), 6)
