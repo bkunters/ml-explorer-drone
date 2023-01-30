@@ -14,7 +14,9 @@ Notes
 """
 
 from collections import deque
+from random import randrange
 import time
+from typing import Optional
 import torch
 from torch import nn
 from torch.optim import Adam, SGD
@@ -61,22 +63,33 @@ DEFAULT_PROJECT_NAME = 'EXP_OpenAIGym_PPO'
 DEFAULT_EXP_NAME = 'exp: (GAE)'
 
 # Hyperparameter
-DEFAULT_TRAINING_STEPS = 1_000_000        # time steps regarding trajectories collected and train agent
-DEFAULT_MAX_TRAJECTORY_SIZE = 1024        # max number of episode samples to be sampled per time step.
-DEFAULT_ROLLOUT_STEPS = 2048              # number of experiences to collect per environment
-DEFAULT_UPDATE_EPOCHS= 64                 # Number of epochs per time step to optimize the neural networks
-DEFAULT_LR_P= 1e-4                        # learning rate for policy network
+# time steps regarding trajectories collected and train agent
+DEFAULT_TRAINING_STEPS = 1_000_000
+# max number of episode samples to be sampled per time step.
+DEFAULT_MAX_TRAJECTORY_SIZE = 1024
+# number of experiences to collect per environment
+DEFAULT_ROLLOUT_STEPS = 2048
+# Number of epochs per time step to optimize the neural networks
+DEFAULT_UPDATE_EPOCHS = 64
+DEFAULT_LR_P = 1e-4                        # learning rate for policy network
 DEFAULT_LR_V = 1e-3                       # learning rate for value network
-DEFAULT_GAE_LAMBDA = 0.92                 # factor for trade-off of bias vs variance for GAE
+# factor for trade-off of bias vs variance for GAE
+DEFAULT_GAE_LAMBDA = 0.92
 DEFAULT_GAMMA = 0.95                      # gamma discount factor
-DEFAULT_ADAM_EPSILON = 1e-7               # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
-DEFAULT_CLIP_RANGE = 0.2                  # clipping factor, default value in PPO baseline implementation is 0.2
-DEFAULT_ENV_ID = 'Pendulum-v1'            # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
+# default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
+DEFAULT_ADAM_EPSILON = 1e-7
+# clipping factor, default value in PPO baseline implementation is 0.2
+DEFAULT_CLIP_RANGE = 0.2
+# name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
+DEFAULT_ENV_ID = 'Pendulum-v1'
 DEFAULT_ENV_NUMBER = 1                    # number of actors
-DEFAULT_NORM_ADV = False                  # wether to normalize the advantage estimate
+# wether to normalize the advantage estimate
+DEFAULT_NORM_ADV = False
 DEFAULT_NORM_RET = True                   # wether to normalize the return function
-DEFAULT_ADV_FUNC = 'gae'                  # wether to take gae, ac, TDac or reinforcement advantage estimate
-DEFAULT_USE_MASK = False                  # wether to use masking based on done flags in gae, TDac
+# wether to take gae, ac, TDac or reinforcement advantage estimate
+DEFAULT_ADV_FUNC = 'gae'
+# wether to use masking based on done flags in gae, TDac
+DEFAULT_USE_MASK = False
 
 # setup for torch save models and rendering
 DEFAULT_VIDEO = False
@@ -98,7 +111,6 @@ DEFAULT_MODEL_PATH = './models/'
 DEFAULT_LOG_PATH = './log/'
 DEFAULT_VIDEO_PATH = './video/'
 DEFAULT_RESULTS_PATH = './results/'
-
 
 
 ####################
@@ -173,7 +185,6 @@ class PolicyNet(Net):
         self.clip_fraction = (abs((ratio - 1.0)) >
                               clip_eps).to(torch.float).mean()
         return policy_loss.mean()  # return mean
-
 
 
 ####################
@@ -270,7 +281,7 @@ class PPO_PolicyGradient_V2:
         # keep track of information
         self.exp_path = exp_path
         self.exp_name = exp_name
-        
+
         # track video of gym
         self.log_video = log_video
         self.video_log_steps = video_log_steps
@@ -508,13 +519,13 @@ class PPO_PolicyGradient_V2:
         prev_advantage = 0
         last_values = values[-1]
         for i in reversed(range(len(cum_returns))):
-            
+
             # masking
             if self.mask:
                 mask = 1.0 - dones[i]
                 last_values = last_values * mask
                 prev_advantage = prev_advantage * mask
-            
+
             # TD residual of V with discount gamma
             # δ_t = r_t + γ * V(s_t+1) − V(s_t)
             delta = cum_returns[i] + (self.gamma * last_values) - values[i]
@@ -529,7 +540,6 @@ class PPO_PolicyGradient_V2:
         if normalized_adv:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
-
 
     def generalized_advantage_estimate_2(self, obs, next_obs, episode_rewards, dones, normalized_adv=False, normalized_ret=False):
         """ (OLD only for comparison) Generalized Advantage Estimate calculation
@@ -601,7 +611,8 @@ class PPO_PolicyGradient_V2:
         ep_lens = []
 
         # Run Monte Carlo simulation for n rollout steps
-        logging.info(f"Collecting trajectories for {n_rollout_steps} rollout steps.")
+        logging.info(
+            f"Collecting trajectories for {n_rollout_steps} rollout steps.")
         while t_step < n_rollout_steps:
 
             # rewards collected
@@ -698,19 +709,20 @@ class PPO_PolicyGradient_V2:
             # Episode: recording of actions and states that an agent performed from a start state to an end state
             # STEP 3: simulate and collect trajectories --> the following values are all per batch over one episode
             obs, next_obs, actions, old_log_probs, dones, rewards, ep_lens, ep_time, frames = self.collect_rollout(
-                 n_rollout_steps=self.n_rollout_steps)
+                n_rollout_steps=self.n_rollout_steps)
 
             # experiences simulated so far
             training_steps += np.sum(ep_lens)
 
             # STEP 4-5: Calculate cummulated reward and advantage at timestep t_step
             values, _, _ = self.get_values(obs, actions)
-            
+
             # Calculate advantage function
             # advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), dones, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), dones, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(
+            ), dones, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
 
             # update network params
             logging.info(
@@ -803,7 +815,8 @@ class PPO_PolicyGradient_V2:
         video_path = os.path.join(path, filename)
         anim.save(video_path, writer='imagemagick', fps=60)
 
-    def log_stats(self, p_losses, v_losses, ep_return, ep_lens, total_episodes, ep_time, done_so_far, exp_name='exp_name'):
+    def log_stats(self, p_losses, v_losses, ep_return, ep_lens, total_episodes, ep_time, \
+                 done_so_far, moving_avg=True, exp_name='exp_name'):
         """Calculate stats and log to W&B, CSV, logger """
         if torch.is_tensor(ep_return):
             ep_return = ep_return.detach().numpy()
@@ -811,6 +824,9 @@ class PPO_PolicyGradient_V2:
         mean_p_loss = round(np.mean([np.sum(loss) for loss in p_losses]), 6)
         mean_v_loss = round(np.mean([np.sum(loss) for loss in v_losses]), 6)
 
+        # Last 100 values
+        if moving_avg:
+            ep_return = ep_return[-100:]
         # Calculate the stats of an episode
         cum_ret = [np.sum(ep_rews) for ep_rews in ep_return]
         mean_ep_time = round(np.mean(ep_time), 6)
@@ -871,9 +887,11 @@ def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=0):
     if gym_wrappers:
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.TransformObservation(
+            env, lambda obs: np.clip(obs, -10, 10))
         env = gym.wrappers.NormalizeReward(env)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        env = gym.wrappers.TransformReward(
+            env, lambda reward: np.clip(reward, -10, 10))
 
     # seed env for reproducability
     env.seed(seed)
@@ -881,9 +899,11 @@ def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=0):
     env.observation_space.seed(seed)
     return env
 
+
 def make_vec_env(num_env=1):
     """ Create a vectorized environment for parallelized training."""
     pass
+
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     """ Initialize the hidden layers with orthogonal initialization
@@ -893,15 +913,24 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+
+def check_seed(seed: Optional[int] = None):
+    if seed is None or seed == 0:
+        seed = np.random.randint(0, 2**32-1)
+    return seed
+
+
 def create_path(path: str) -> None:
     if not os.path.exists(path):
         os.makedirs(path)
+
 
 def load_model(path, model, device='cpu'):
     logging.info(f"Loading model weights from {path}...")
     checkpoint = torch.load(path)
     model.load_state_dict(checkpoint['model_state_dict'])
     return model
+
 
 def simulate_rollout(policy_net, env, n_rollout_steps=2048, render_video=True):
     """Simulate rollout until process is interrupted."""
@@ -910,7 +939,7 @@ def simulate_rollout(policy_net, env, n_rollout_steps=2048, render_video=True):
         # Logging data
         steps_so_far = 0
         ep_len, ep_returns = 0, 0
-        
+
         while not done:
             steps_so_far += 1
             # render environment
@@ -923,8 +952,9 @@ def simulate_rollout(policy_net, env, n_rollout_steps=2048, render_video=True):
             ep_returns += reward
 
         ep_len = steps_so_far
-        # returns episodic length and return 
+        # returns episodic length and return
         yield ep_len, ep_returns
+
 
 def _log_summary(ep_len, ep_ret, ep_num):
 
@@ -942,7 +972,6 @@ def _log_summary(ep_len, ep_ret, ep_num):
     logging.info('\n')
 
 
-
 ####################
 ####################
 
@@ -950,40 +979,41 @@ def _log_summary(ep_len, ep_ret, ep_num):
 def train(env, in_dim, out_dim, train_steps, max_trajectory_size=512, n_rollout_steps=2048,
           n_optepochs=32, learning_rate_p=1e-4, learning_rate_v=1e-3, gae_lambda=0.95, gamma=0.99, epsilon=0.2,
           adam_epsilon=1e-8, render_steps=10, render_video=False, save_steps=10, csv_writer=None, stats_plotter=None,
-          mask=False, normalize_adv=False, normalize_ret=False, log_video=False, video_log_steps=1000, ppo_version='v2', 
+          mask=False, normalize_adv=False, normalize_ret=False, log_video=False, video_log_steps=1000, ppo_version='v2',
           device='cpu', exp_path='./log/', exp_name='PPO-experiment'):
     """Train the policy network (actor) and the value network (critic) with PPO (clip version)"""
     agent = None
     if ppo_version == 'v2':
         agent = PPO_PolicyGradient_V2(
-                    env, 
-                    in_dim=in_dim, 
-                    out_dim=out_dim,
-                    train_steps=train_steps,
-                    max_trajectory_size=max_trajectory_size,
-                    n_rollout_steps=n_rollout_steps,
-                    n_optepochs=n_optepochs,
-                    lr_p=learning_rate_p,
-                    lr_v=learning_rate_v,
-                    gae_lambda = gae_lambda,
-                    gamma=gamma,
-                    epsilon=epsilon,
-                    adam_eps=adam_epsilon,
-                    normalize_adv=normalize_adv,
-                    normalize_ret=normalize_ret,
-                    mask=mask,
-                    render_steps=render_steps,
-                    render_video=render_video,
-                    save_model=save_steps,
-                    csv_writer=csv_writer,
-                    stats_plotter=stats_plotter,
-                    log_video=log_video,
-                    video_log_steps=video_log_steps,
-                    device=device,
-                    exp_path=exp_path,
-                    exp_name=exp_name)
+            env,
+            in_dim=in_dim,
+            out_dim=out_dim,
+            train_steps=train_steps,
+            max_trajectory_size=max_trajectory_size,
+            n_rollout_steps=n_rollout_steps,
+            n_optepochs=n_optepochs,
+            lr_p=learning_rate_p,
+            lr_v=learning_rate_v,
+            gae_lambda=gae_lambda,
+            gamma=gamma,
+            epsilon=epsilon,
+            adam_eps=adam_epsilon,
+            normalize_adv=normalize_adv,
+            normalize_ret=normalize_ret,
+            mask=mask,
+            render_steps=render_steps,
+            render_video=render_video,
+            save_model=save_steps,
+            csv_writer=csv_writer,
+            stats_plotter=stats_plotter,
+            log_video=log_video,
+            video_log_steps=video_log_steps,
+            device=device,
+            exp_path=exp_path,
+            exp_name=exp_name)
     # run training for a total amount of steps
     agent.learn()
+
 
 def test(path, env, in_dim, out_dim, steps=10_000, render_video=True, log_video=False, device='cpu'):
     """Test the policy network (actor)"""
@@ -995,7 +1025,8 @@ def test(path, env, in_dim, out_dim, steps=10_000, render_video=True, log_video=
         _log_summary(ep_len=ep_len, ep_ret=ep_ret, ep_num=ep_num)
 
         if log_video:
-            wandb.log({"test/video": wandb.Video(DEFAULT_VIDEO_PATH, caption='episode: '+str(ep_num), fps=4, format="gif"), "step": ep_num})
+            wandb.log({"test/video": wandb.Video(DEFAULT_VIDEO_PATH,
+                      caption='episode: '+str(ep_num), fps=4, format="gif"), "step": ep_num})
 
 
 ####################
@@ -1005,19 +1036,19 @@ def hyperparam_tuning(env, config=None):
     # set config
     with wandb.init(config=config):
         agent = PPO_PolicyGradient_V2(
-                env,
-                in_dim=config.obs_dim, 
-                out_dim=config.act_dim,
-                train_steps=config.train_steps,
-                max_trajectory_size=config.max_trajectory_size,
-                n_rollout_steps=config.n_rollout_steps,
-                n_optepochs=config.n_optepochs,
-                gae_lambda = config.gae_lambda,
-                gamma=config.gamma,
-                epsilon=config.epsilon,
-                adam_eps=config.adam_epsilon,
-                lr_p=config.learning_rate_p,
-                lr_v=config.learning_rate_v)
+            env,
+            in_dim=config.obs_dim,
+            out_dim=config.act_dim,
+            train_steps=config.train_steps,
+            max_trajectory_size=config.max_trajectory_size,
+            n_rollout_steps=config.n_rollout_steps,
+            n_optepochs=config.n_optepochs,
+            gae_lambda=config.gae_lambda,
+            gamma=config.gamma,
+            epsilon=config.epsilon,
+            adam_eps=config.adam_epsilon,
+            lr_p=config.learning_rate_p,
+            lr_v=config.learning_rate_v)
 
         # run training for a total amount of steps
         agent.learn()
@@ -1046,7 +1077,7 @@ def run(env_id=DEFAULT_ENV_ID,
         normalize_adv=DEFAULT_NORM_ADV,
         normalize_ret=DEFAULT_NORM_RET,
         mask=DEFAULT_USE_MASK,
-        seed=DEFAULT_SEED,
+        seed: Optional[int] = DEFAULT_SEED,
         torch_deterministic=DEFAULT_TORCH_DETERMINISTIC,
         cuda=DEFAULT_CUDA,
         project_name=DEFAULT_PROJECT_NAME,
@@ -1059,7 +1090,7 @@ def run(env_id=DEFAULT_ENV_ID,
         run_train=DEFAULT_TRAIN,
         run_test=DEFAULT_TEST,
         run_test_model_path=DEFAULT_TEST_MODEL_PATH):
-    
+
     # Configure logger
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
@@ -1069,6 +1100,8 @@ def run(env_id=DEFAULT_ENV_ID,
     create_path(log_path)
     create_path(results_path)
 
+    seed = check_seed(seed)
+
     # seed gym, torch and numpy
     env = make_env(env_id, seed=seed)
     torch.manual_seed(seed)
@@ -1076,7 +1109,8 @@ def run(env_id=DEFAULT_ENV_ID,
     torch.backends.cudnn.deterministic = torch_deterministic
 
     # get correct device
-    device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() and cuda else "cpu")
 
     # get dimensions of obs (what goes in?)
     # and actions (what goes out?)
@@ -1091,15 +1125,17 @@ def run(env_id=DEFAULT_ENV_ID,
     logging.info(f'env action upper bound: {upper_bound}')
     logging.info(f'env action lower bound: {lower_bound}')
 
-    obs_dim = obs_shape[0] 
-    act_dim = act_shape[0] # 2 at CartPole
+    obs_dim = obs_shape[0]
+    act_dim = act_shape[0]  # 2 at CartPole
 
     logging.info(f'env observation dim: {obs_dim}')
     logging.info(f'env action dim: {act_dim}')
 
     # upper and lower bound describing the values our obs can take
-    logging.info(f'upper bound for env observation: {env.observation_space.high}')
-    logging.info(f'lower bound for env observation: {env.observation_space.low}')
+    logging.info(
+        f'upper bound for env observation: {env.observation_space.high}')
+    logging.info(
+        f'lower bound for env observation: {env.observation_space.low}')
 
     # create folder for project
     exp_name = f"exp_name: {env_id}_{CURR_DATE} {exp_name}"
@@ -1113,91 +1149,93 @@ def run(env_id=DEFAULT_ENV_ID,
     csv_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
     png_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.png')
     csv_writer = CSVWriter(csv_file)
-    stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+    stats_plotter = StatsPlotter(
+        csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
     # Monitoring with W&B
     if not run_hyperparam:
         wandb.init(
-                project=project_name,
-                entity='drone-mechanics',
-                sync_tensorboard=True,
-                config={ # stores hyperparams in job
-                    'env name': env_id,
-                    'env number': env_number,
-                    'train_steps': train_steps,
-                    'max sampled trajectories': max_trajectory_size,
-                    'trajectories per episode': n_rollout_steps,
-                    'number of epochs for update': n_optepochs,
-                    'input layer size': obs_dim,
-                    'output layer size': act_dim,
-                    'observation space': obs_shape,
-                    'action space': act_shape,
-                    'action space upper bound': upper_bound,
-                    'action space lower bound': lower_bound,
-                    'learning rate (policy net)': learning_rate_p,
-                    'learning rate (value net)': learning_rate_v,
-                    'epsilon (adam optimizer)': adam_epsilon,
-                    'gamma (discount)': gamma,
-                    'epsilon (clip_range)': epsilon,
-                    'gae lambda (GAE)': gae_lambda,
-                    'normalize advantage': normalize_adv,
-                    'normalize return': normalize_ret,
-                    'mask': mask,
-                    'seed': seed,
-                    'experiment path': exp_folder_name,
-                    'experiment name': exp_name
-                },
-                dir=os.getcwd(),
-                name=exp_name,
-                monitor_gym=True,
-                save_code=True
-            )
+            project=project_name,
+            entity='drone-mechanics',
+            sync_tensorboard=True,
+            config={  # stores hyperparams in job
+                'env name': env_id,
+                'env number': env_number,
+                'train_steps': train_steps,
+                'max sampled trajectories': max_trajectory_size,
+                'trajectories per episode': n_rollout_steps,
+                'number of epochs for update': n_optepochs,
+                'input layer size': obs_dim,
+                'output layer size': act_dim,
+                'observation space': obs_shape,
+                'action space': act_shape,
+                'action space upper bound': upper_bound,
+                'action space lower bound': lower_bound,
+                'learning rate (policy net)': learning_rate_p,
+                'learning rate (value net)': learning_rate_v,
+                'epsilon (adam optimizer)': adam_epsilon,
+                'gamma (discount)': gamma,
+                'epsilon (clip_range)': epsilon,
+                'gae lambda (GAE)': gae_lambda,
+                'normalize advantage': normalize_adv,
+                'normalize return': normalize_ret,
+                'mask': mask,
+                'seed': seed,
+                'experiment path': exp_folder_name,
+                'experiment name': exp_name
+            },
+            dir=os.getcwd(),
+            name=exp_name,
+            monitor_gym=True,
+            save_code=True
+        )
 
     if run_train:
         logging.info('Training model...')
         train(env,
-            in_dim=obs_dim, 
-            out_dim=act_dim,
-            train_steps=train_steps,
-            max_trajectory_size=max_trajectory_size,
-            n_rollout_steps=n_rollout_steps,
-            n_optepochs=n_optepochs,
-            learning_rate_p=learning_rate_p, 
-            learning_rate_v=learning_rate_v,
-            gae_lambda=gae_lambda,
-            gamma=gamma,
-            epsilon=epsilon,
-            adam_epsilon=adam_epsilon,
-            normalize_adv=normalize_adv,
-            normalize_ret=normalize_ret,
-            mask=mask,
-            render_steps=render_steps,
-            render_video=render_video,
-            save_steps=save_steps,
-            csv_writer=csv_writer,
-            stats_plotter=stats_plotter,
-            log_video=video,
-            video_log_steps=video_log_steps,
-            device=device,
-            exp_path=exp_folder_name,
-            exp_name=exp_name)
+              in_dim=obs_dim,
+              out_dim=act_dim,
+              train_steps=train_steps,
+              max_trajectory_size=max_trajectory_size,
+              n_rollout_steps=n_rollout_steps,
+              n_optepochs=n_optepochs,
+              learning_rate_p=learning_rate_p,
+              learning_rate_v=learning_rate_v,
+              gae_lambda=gae_lambda,
+              gamma=gamma,
+              epsilon=epsilon,
+              adam_epsilon=adam_epsilon,
+              normalize_adv=normalize_adv,
+              normalize_ret=normalize_ret,
+              mask=mask,
+              render_steps=render_steps,
+              render_video=render_video,
+              save_steps=save_steps,
+              csv_writer=csv_writer,
+              stats_plotter=stats_plotter,
+              log_video=video,
+              video_log_steps=video_log_steps,
+              device=device,
+              exp_path=exp_folder_name,
+              exp_name=exp_name)
 
     elif run_test:
         logging.info('Evaluating model...')
-        test(run_test_model_path, env, in_dim=obs_dim, out_dim=act_dim, device=device)
+        test(run_test_model_path, env, in_dim=obs_dim,
+             out_dim=act_dim, device=device)
 
     elif run_hyperparam:
         """automatically run through multiple train runs"""
 
         param_dict = {
-                'learning rate (policy net)': [1e-5, 1e-4, 1e-3, 1e-2],
-                'learning rate (value net)': [1e-5, 1e-4, 1e-3, 1e-2],
-                'gamma (discount)': [0.95, 0.96, 0.97, 0.98, 0.99],
-                'epsilon (clip_range)': [0.1, 0.2, 0.3],
-                'gae lambda (GAE)': [0.9, 0.93, 0.95, 0.96, 0.97, 0.99, 1.0],
-                'epsilon (adam optimizer)': [1e-9, 1e-8, 1e-7, 1e-6, 1e-5],
-                'number of epochs for update': [8, 16, 32, 64, 128, 256],
-                'max sampled trajectories': [32, 64, 128, 256, 512, 1024, 2048, 4096]
+            'learning rate (policy net)': [1e-5, 1e-4, 1e-3, 1e-2],
+            'learning rate (value net)': [1e-5, 1e-4, 1e-3, 1e-2],
+            'gamma (discount)': [0.95, 0.96, 0.97, 0.98, 0.99],
+            'epsilon (clip_range)': [0.1, 0.2, 0.3],
+            'gae lambda (GAE)': [0.9, 0.93, 0.95, 0.96, 0.97, 0.99, 1.0],
+            'epsilon (adam optimizer)': [1e-9, 1e-8, 1e-7, 1e-6, 1e-5],
+            'number of epochs for update': [8, 16, 32, 64, 128, 256],
+            'max sampled trajectories': [32, 64, 128, 256, 512, 1024, 2048, 4096]
         }
 
         # iterate over settings
@@ -1221,37 +1259,40 @@ def run(env_id=DEFAULT_ENV_ID,
                         create_path(model_path)
 
                         # create CSV writer
-                        csv_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
-                        png_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.png')
+                        csv_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
+                        png_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.png')
                         csv_writer = CSVWriter(csv_file)
-                        stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+                        stats_plotter = StatsPlotter(
+                            csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
                         wandb.init(
-                                    project=project_name,
-                                    entity='drone-mechanics',
-                                    sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
-                                        'trajectories per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
-                                        'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
-                                        'learning rate (policy net)': val[i],'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
-                                        'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
-                                        'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': exp_name
+                            project=project_name,
+                            entity='drone-mechanics',
+                            sync_tensorboard=True,
+                            config={'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
+                                    'trajectories per episode': n_rollout_steps, 'number of epochs for update': n_optepochs, 'input layer size': obs_dim, 'output layer size': act_dim,
+                                    'observation space': obs_shape, 'action space': act_shape, 'action space upper bound': upper_bound, 'action space lower bound': lower_bound,
+                                    'learning rate (policy net)': val[i], 'learning rate (value net)': learning_rate_v, 'epsilon (adam optimizer)': adam_epsilon,
+                                    'gamma (discount)': gamma, 'epsilon (clip_range)': epsilon, 'gae lambda (GAE)': gae_lambda, 'normalize advantage': normalize_adv,
+                                    'normalize return': normalize_ret, 'seed': seed, 'experiment path': exp_folder_name, 'experiment name': exp_name
                                     },
-                                    dir=os.getcwd(),
-                                    name=exp_name,
-                                    monitor_gym=True,
-                                    save_code=True
+                            dir=os.getcwd(),
+                            name=exp_name,
+                            monitor_gym=True,
+                            save_code=True
                         )
                         # Run the training
                         train(env,
-                            in_dim=obs_dim, 
-                            out_dim=act_dim,
-                            train_steps=train_steps,
-                            learning_rate_p=val[i],
-                            exp_path=exp_folder_name,
-                            exp_name=exp_name,
-                            normalize_adv=normalize_adv,
-                            normalize_ret=normalize_ret)
+                              in_dim=obs_dim,
+                              out_dim=act_dim,
+                              train_steps=train_steps,
+                              learning_rate_p=val[i],
+                              exp_path=exp_folder_name,
+                              exp_name=exp_name,
+                              normalize_adv=normalize_adv,
+                              normalize_ret=normalize_ret)
 
                         # clean up
                         logging.info("---- Done ----")
@@ -1273,37 +1314,40 @@ def run(env_id=DEFAULT_ENV_ID,
                         create_path(model_path)
 
                         # create CSV writer
-                        csv_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
-                        png_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.png')
+                        csv_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
+                        png_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.png')
                         csv_writer = CSVWriter(csv_file)
-                        stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+                        stats_plotter = StatsPlotter(
+                            csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
                         wandb.init(
-                                    project=project_name,
-                                    entity='drone-mechanics',
-                                    sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
-                                        'trajectories per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
-                                        'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
-                                        'learning rate (policy net)': learning_rate_p,'learning rate (value net)': val[i],'epsilon (adam optimizer)': adam_epsilon,
-                                        'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
-                                        'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': exp_name
+                            project=project_name,
+                            entity='drone-mechanics',
+                            sync_tensorboard=True,
+                            config={'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
+                                    'trajectories per episode': n_rollout_steps, 'number of epochs for update': n_optepochs, 'input layer size': obs_dim, 'output layer size': act_dim,
+                                    'observation space': obs_shape, 'action space': act_shape, 'action space upper bound': upper_bound, 'action space lower bound': lower_bound,
+                                    'learning rate (policy net)': learning_rate_p, 'learning rate (value net)': val[i], 'epsilon (adam optimizer)': adam_epsilon,
+                                    'gamma (discount)': gamma, 'epsilon (clip_range)': epsilon, 'gae lambda (GAE)': gae_lambda, 'normalize advantage': normalize_adv,
+                                    'normalize return': normalize_ret, 'seed': seed, 'experiment path': exp_folder_name, 'experiment name': exp_name
                                     },
-                                    dir=os.getcwd(),
-                                    name=exp_name,
-                                    monitor_gym=True,
-                                    save_code=True
+                            dir=os.getcwd(),
+                            name=exp_name,
+                            monitor_gym=True,
+                            save_code=True
                         )
                         # Train loop
                         train(env,
-                            in_dim=obs_dim, 
-                            out_dim=act_dim,
-                            train_steps=train_steps,
-                            learning_rate_v=val[i],
-                            exp_path=exp_folder_name,
-                            exp_name=exp_name,
-                            normalize_adv=normalize_adv,
-                            normalize_ret=normalize_ret)
+                              in_dim=obs_dim,
+                              out_dim=act_dim,
+                              train_steps=train_steps,
+                              learning_rate_v=val[i],
+                              exp_path=exp_folder_name,
+                              exp_name=exp_name,
+                              normalize_adv=normalize_adv,
+                              normalize_ret=normalize_ret)
 
                         # clean up
                         logging.info("---- Done ----")
@@ -1325,37 +1369,40 @@ def run(env_id=DEFAULT_ENV_ID,
                         create_path(model_path)
 
                         # create CSV writer
-                        csv_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
-                        png_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.png')
+                        csv_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
+                        png_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.png')
                         csv_writer = CSVWriter(csv_file)
-                        stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+                        stats_plotter = StatsPlotter(
+                            csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
                         wandb.init(
-                                    project=project_name,
-                                    entity='drone-mechanics',
-                                    sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
-                                        'trajectories per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
-                                        'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
-                                        'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
-                                        'gamma (discount)': val[i],'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
-                                        'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': exp_name
+                            project=project_name,
+                            entity='drone-mechanics',
+                            sync_tensorboard=True,
+                            config={'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
+                                    'trajectories per episode': n_rollout_steps, 'number of epochs for update': n_optepochs, 'input layer size': obs_dim, 'output layer size': act_dim,
+                                    'observation space': obs_shape, 'action space': act_shape, 'action space upper bound': upper_bound, 'action space lower bound': lower_bound,
+                                    'learning rate (policy net)': learning_rate_p, 'learning rate (value net)': learning_rate_v, 'epsilon (adam optimizer)': adam_epsilon,
+                                    'gamma (discount)': val[i], 'epsilon (clip_range)': epsilon, 'gae lambda (GAE)': gae_lambda, 'normalize advantage': normalize_adv,
+                                    'normalize return': normalize_ret, 'seed': seed, 'experiment path': exp_folder_name, 'experiment name': exp_name
                                     },
-                                    dir=os.getcwd(),
-                                    name=exp_name,
-                                    monitor_gym=True,
-                                    save_code=True
+                            dir=os.getcwd(),
+                            name=exp_name,
+                            monitor_gym=True,
+                            save_code=True
                         )
                         # Train loop
                         train(env,
-                            in_dim=obs_dim, 
-                            out_dim=act_dim,
-                            train_steps=train_steps,
-                            gamma=val[i],
-                            exp_path=exp_folder_name,
-                            exp_name=exp_name,
-                            normalize_adv=normalize_adv,
-                            normalize_ret=normalize_ret)
+                              in_dim=obs_dim,
+                              out_dim=act_dim,
+                              train_steps=train_steps,
+                              gamma=val[i],
+                              exp_path=exp_folder_name,
+                              exp_name=exp_name,
+                              normalize_adv=normalize_adv,
+                              normalize_ret=normalize_ret)
 
                         # clean up
                         logging.info("---- Done ----")
@@ -1377,37 +1424,40 @@ def run(env_id=DEFAULT_ENV_ID,
                         create_path(model_path)
 
                         # create CSV writer
-                        csv_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
-                        png_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.png')
+                        csv_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
+                        png_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.png')
                         csv_writer = CSVWriter(csv_file)
-                        stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+                        stats_plotter = StatsPlotter(
+                            csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
                         wandb.init(
-                                    project=project_name,
-                                    entity='drone-mechanics',
-                                    sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
-                                        'trajectories per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
-                                        'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
-                                        'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
-                                        'gamma (discount)': gamma,'epsilon (clip_range)': val[i],'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
-                                        'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': exp_name
+                            project=project_name,
+                            entity='drone-mechanics',
+                            sync_tensorboard=True,
+                            config={'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
+                                    'trajectories per episode': n_rollout_steps, 'number of epochs for update': n_optepochs, 'input layer size': obs_dim, 'output layer size': act_dim,
+                                    'observation space': obs_shape, 'action space': act_shape, 'action space upper bound': upper_bound, 'action space lower bound': lower_bound,
+                                    'learning rate (policy net)': learning_rate_p, 'learning rate (value net)': learning_rate_v, 'epsilon (adam optimizer)': adam_epsilon,
+                                    'gamma (discount)': gamma, 'epsilon (clip_range)': val[i], 'gae lambda (GAE)': gae_lambda, 'normalize advantage': normalize_adv,
+                                    'normalize return': normalize_ret, 'seed': seed, 'experiment path': exp_folder_name, 'experiment name': exp_name
                                     },
-                                    dir=os.getcwd(),
-                                    name=exp_name,
-                                    monitor_gym=True,
-                                    save_code=True
+                            dir=os.getcwd(),
+                            name=exp_name,
+                            monitor_gym=True,
+                            save_code=True
                         )
                         # Train loop
                         train(env,
-                            in_dim=obs_dim, 
-                            out_dim=act_dim,
-                            train_steps=train_steps,
-                            epsilon=val[i],
-                            exp_path=exp_folder_name,
-                            exp_name=exp_name,
-                            normalize_adv=normalize_adv,
-                            normalize_ret=normalize_ret)
+                              in_dim=obs_dim,
+                              out_dim=act_dim,
+                              train_steps=train_steps,
+                              epsilon=val[i],
+                              exp_path=exp_folder_name,
+                              exp_name=exp_name,
+                              normalize_adv=normalize_adv,
+                              normalize_ret=normalize_ret)
 
                         # clean up
                         logging.info("---- Done ----")
@@ -1429,38 +1479,41 @@ def run(env_id=DEFAULT_ENV_ID,
                         create_path(model_path)
 
                         # create CSV writer
-                        csv_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
-                        png_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.png')
+                        csv_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
+                        png_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.png')
                         csv_writer = CSVWriter(csv_file)
-                        stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+                        stats_plotter = StatsPlotter(
+                            csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
                         wandb.init(
-                                    project=project_name,
-                                    entity='drone-mechanics',
-                                    sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
-                                        'trajectories per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
-                                        'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
-                                        'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
-                                        'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': val[i],'normalize advantage': normalize_adv,
-                                        'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': exp_name
+                            project=project_name,
+                            entity='drone-mechanics',
+                            sync_tensorboard=True,
+                            config={'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
+                                    'trajectories per episode': n_rollout_steps, 'number of epochs for update': n_optepochs, 'input layer size': obs_dim, 'output layer size': act_dim,
+                                    'observation space': obs_shape, 'action space': act_shape, 'action space upper bound': upper_bound, 'action space lower bound': lower_bound,
+                                    'learning rate (policy net)': learning_rate_p, 'learning rate (value net)': learning_rate_v, 'epsilon (adam optimizer)': adam_epsilon,
+                                    'gamma (discount)': gamma, 'epsilon (clip_range)': epsilon, 'gae lambda (GAE)': val[i], 'normalize advantage': normalize_adv,
+                                    'normalize return': normalize_ret, 'seed': seed, 'experiment path': exp_folder_name, 'experiment name': exp_name
                                     },
-                                    dir=os.getcwd(),
-                                    name=exp_name,
-                                    monitor_gym=True,
-                                    save_code=True
+                            dir=os.getcwd(),
+                            name=exp_name,
+                            monitor_gym=True,
+                            save_code=True
                         )
 
                         # Train loop
                         train(env,
-                            in_dim=obs_dim, 
-                            out_dim=act_dim,
-                            train_steps=train_steps,
-                            gae_lambda=val[i],
-                            exp_path=exp_folder_name,
-                            exp_name=exp_name,
-                            normalize_adv=normalize_adv,
-                            normalize_ret=normalize_ret)
+                              in_dim=obs_dim,
+                              out_dim=act_dim,
+                              train_steps=train_steps,
+                              gae_lambda=val[i],
+                              exp_path=exp_folder_name,
+                              exp_name=exp_name,
+                              normalize_adv=normalize_adv,
+                              normalize_ret=normalize_ret)
 
                         # clean up
                         logging.info("---- Done ----")
@@ -1482,38 +1535,41 @@ def run(env_id=DEFAULT_ENV_ID,
                         create_path(model_path)
 
                         # create CSV writer
-                        csv_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
-                        png_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.png')
+                        csv_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
+                        png_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.png')
                         csv_writer = CSVWriter(csv_file)
-                        stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+                        stats_plotter = StatsPlotter(
+                            csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
                         wandb.init(
-                                    project=project_name,
-                                    entity='drone-mechanics',
-                                    sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
-                                        'trajectories per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
-                                        'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
-                                        'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': val[i],
-                                        'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
-                                        'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': exp_name
+                            project=project_name,
+                            entity='drone-mechanics',
+                            sync_tensorboard=True,
+                            config={'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
+                                    'trajectories per episode': n_rollout_steps, 'number of epochs for update': n_optepochs, 'input layer size': obs_dim, 'output layer size': act_dim,
+                                    'observation space': obs_shape, 'action space': act_shape, 'action space upper bound': upper_bound, 'action space lower bound': lower_bound,
+                                    'learning rate (policy net)': learning_rate_p, 'learning rate (value net)': learning_rate_v, 'epsilon (adam optimizer)': val[i],
+                                    'gamma (discount)': gamma, 'epsilon (clip_range)': epsilon, 'gae lambda (GAE)': gae_lambda, 'normalize advantage': normalize_adv,
+                                    'normalize return': normalize_ret, 'seed': seed, 'experiment path': exp_folder_name, 'experiment name': exp_name
                                     },
-                                    dir=os.getcwd(),
-                                    name=exp_name,
-                                    monitor_gym=True,
-                                    save_code=True
+                            dir=os.getcwd(),
+                            name=exp_name,
+                            monitor_gym=True,
+                            save_code=True
                         )
 
                         # Train loop
                         train(env,
-                            in_dim=obs_dim, 
-                            out_dim=act_dim,
-                            train_steps=train_steps,
-                            adam_epsilon=val[i],
-                            exp_path=exp_folder_name,
-                            exp_name=exp_name,
-                            normalize_adv=normalize_adv,
-                            normalize_ret=normalize_ret)
+                              in_dim=obs_dim,
+                              out_dim=act_dim,
+                              train_steps=train_steps,
+                              adam_epsilon=val[i],
+                              exp_path=exp_folder_name,
+                              exp_name=exp_name,
+                              normalize_adv=normalize_adv,
+                              normalize_ret=normalize_ret)
 
                         # clean up
                         logging.info("---- Done ----")
@@ -1535,38 +1591,41 @@ def run(env_id=DEFAULT_ENV_ID,
                         create_path(model_path)
 
                         # create CSV writer
-                        csv_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
-                        png_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.png')
+                        csv_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
+                        png_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.png')
                         csv_writer = CSVWriter(csv_file)
-                        stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+                        stats_plotter = StatsPlotter(
+                            csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
                         wandb.init(
-                                    project=project_name,
-                                    entity='drone-mechanics',
-                                    sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
-                                        'trajectories per episode': n_rollout_steps,'number of epochs for update': val[i],'input layer size': obs_dim,'output layer size': act_dim,
-                                        'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
-                                        'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
-                                        'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
-                                        'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': exp_name
+                            project=project_name,
+                            entity='drone-mechanics',
+                            sync_tensorboard=True,
+                            config={'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
+                                    'trajectories per episode': n_rollout_steps, 'number of epochs for update': val[i], 'input layer size': obs_dim, 'output layer size': act_dim,
+                                    'observation space': obs_shape, 'action space': act_shape, 'action space upper bound': upper_bound, 'action space lower bound': lower_bound,
+                                    'learning rate (policy net)': learning_rate_p, 'learning rate (value net)': learning_rate_v, 'epsilon (adam optimizer)': adam_epsilon,
+                                    'gamma (discount)': gamma, 'epsilon (clip_range)': epsilon, 'gae lambda (GAE)': gae_lambda, 'normalize advantage': normalize_adv,
+                                    'normalize return': normalize_ret, 'seed': seed, 'experiment path': exp_folder_name, 'experiment name': exp_name
                                     },
-                                    dir=os.getcwd(),
-                                    name=exp_name,
-                                    monitor_gym=True,
-                                    save_code=True
+                            dir=os.getcwd(),
+                            name=exp_name,
+                            monitor_gym=True,
+                            save_code=True
                         )
                         # Train loop
 
                         train(env,
-                            in_dim=obs_dim, 
-                            out_dim=act_dim,
-                            train_steps=train_steps,
-                            n_optepochs=val[i],
-                            exp_path=exp_folder_name,
-                            exp_name=exp_name,
-                            normalize_adv=normalize_adv,
-                            normalize_ret=normalize_ret)
+                              in_dim=obs_dim,
+                              out_dim=act_dim,
+                              train_steps=train_steps,
+                              n_optepochs=val[i],
+                              exp_path=exp_folder_name,
+                              exp_name=exp_name,
+                              normalize_adv=normalize_adv,
+                              normalize_ret=normalize_ret)
 
                         # clean up
                         logging.info("---- Done ----")
@@ -1588,38 +1647,41 @@ def run(env_id=DEFAULT_ENV_ID,
                         create_path(model_path)
 
                         # create CSV writer
-                        csv_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
-                        png_file = os.path.join(exp_folder_name, f'{env_id}_{CURR_TIME}.png')
+                        csv_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.csv')
+                        png_file = os.path.join(
+                            exp_folder_name, f'{env_id}_{CURR_TIME}.png')
                         csv_writer = CSVWriter(csv_file)
-                        stats_plotter = StatsPlotter(csv_folder_path=exp_folder_name, file_name_and_path=png_file)
+                        stats_plotter = StatsPlotter(
+                            csv_folder_path=exp_folder_name, file_name_and_path=png_file)
 
                         wandb.init(
-                                    project=project_name,
-                                    entity='drone-mechanics',
-                                    sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': val[i],
-                                        'trajectories per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
-                                        'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
-                                        'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
-                                        'gamma (discount)': gamma,'epsilon (clip_range)': epsilon,'gae lambda (GAE)': gae_lambda,'normalize advantage': normalize_adv,
-                                        'normalize return': normalize_ret,'seed': seed,'experiment path': exp_folder_name,'experiment name': exp_name
+                            project=project_name,
+                            entity='drone-mechanics',
+                            sync_tensorboard=True,
+                            config={'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': val[i],
+                                    'trajectories per episode': n_rollout_steps, 'number of epochs for update': n_optepochs, 'input layer size': obs_dim, 'output layer size': act_dim,
+                                    'observation space': obs_shape, 'action space': act_shape, 'action space upper bound': upper_bound, 'action space lower bound': lower_bound,
+                                    'learning rate (policy net)': learning_rate_p, 'learning rate (value net)': learning_rate_v, 'epsilon (adam optimizer)': adam_epsilon,
+                                    'gamma (discount)': gamma, 'epsilon (clip_range)': epsilon, 'gae lambda (GAE)': gae_lambda, 'normalize advantage': normalize_adv,
+                                    'normalize return': normalize_ret, 'seed': seed, 'experiment path': exp_folder_name, 'experiment name': exp_name
                                     },
-                                    dir=os.getcwd(),
-                                    name=exp_name,
-                                    monitor_gym=True,
-                                    save_code=True
+                            dir=os.getcwd(),
+                            name=exp_name,
+                            monitor_gym=True,
+                            save_code=True
                         )
 
                         # Train loop
                         train(env,
-                            in_dim=obs_dim, 
-                            out_dim=act_dim,
-                            train_steps=train_steps,
-                            max_trajectory_size=val[i],
-                            exp_path=exp_folder_name,
-                            exp_name=exp_name,
-                            normalize_adv=normalize_adv,
-                            normalize_ret=normalize_ret)
+                              in_dim=obs_dim,
+                              out_dim=act_dim,
+                              train_steps=train_steps,
+                              max_trajectory_size=val[i],
+                              exp_path=exp_folder_name,
+                              exp_name=exp_name,
+                              normalize_adv=normalize_adv,
+                              normalize_ret=normalize_ret)
 
                         # clean up
                         logging.info("---- Done ----")
@@ -1629,10 +1691,11 @@ def run(env_id=DEFAULT_ENV_ID,
                 case _:
                     env.close()
                     wandb.run.finish() if wandb and wandb.run else None
-                    AssertionError('Incorrect params!')            
+                    AssertionError('Incorrect params!')
 
     else:
-        assert("Needs training (--train), testing (--test) or hyperparameter tuning (--hyperparam) flag set!")
+        assert (
+            "Needs training (--train), testing (--test) or hyperparameter tuning (--hyperparam) flag set!")
 
     #################
     #### Cleanup ####
@@ -1640,10 +1703,9 @@ def run(env_id=DEFAULT_ENV_ID,
 
     logging.info('### Done ###')
 
-    # cleanup 
+    # cleanup
     env.close()
     wandb.run.finish() if wandb and wandb.run else None
-
 
 
 #######################################
@@ -1667,7 +1729,7 @@ def arg_parser():
     parser.add_argument("--normalize_ret",          type=lambda x: bool(strtobool(x)),  default=DEFAULT_NORM_RET,           nargs="?", const=False, help="default True, if toggled, normalize returns")
     parser.add_argument("--normalize_adv",          type=lambda x: bool(strtobool(x)),  default=DEFAULT_NORM_ADV,           nargs="?", const=False, help="default False, if toggled, normalize returns")
     parser.add_argument("--mask",                   type=lambda x: bool(strtobool(x)),  default=DEFAULT_USE_MASK,           nargs="?", const=False, help="default False, if toggled, use masking")
-    parser.add_argument("--seed",                   type=int,                           default=DEFAULT_SEED,               help="seed of the experiment")
+    parser.add_argument("--seed",                   type=int,                           default=DEFAULT_SEED,               help="seed of the experiment. If 0 random seeding selected.")
     parser.add_argument("--torch_deterministic",    type=lambda x: bool(strtobool(x)),  default=True, nargs="?", const=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda",                   type=lambda x: bool(strtobool(x)),  default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
 

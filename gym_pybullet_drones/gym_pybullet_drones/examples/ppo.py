@@ -1,6 +1,7 @@
 from collections import deque
 import random
 import time
+from typing import Optional
 from gym_pybullet_drones.examples.utils import proc_id
 import torch
 from torch import nn
@@ -40,6 +41,7 @@ DEFAULT_ADAM_EPSILON = 1e-7               # default in the PPO baseline implemen
 DEFAULT_NORM_ADV = False                  # wether to normalize the advantage estimate
 DEFAULT_NORM_RET = True                   # wether to normalize the return function
 DEFAULT_ADV_FUNC = 'gae'                  # wether to take gae, ac, td_ac or reinforce for usage of advantage estimate
+DEFAULT_SEED = 42
 
 # Paths and other constants
 MODEL_PATH = './models/'
@@ -269,7 +271,7 @@ class PPO_PolicyGradient:
                  device='cpu',
                  exp_path='./log/',
                  exp_name='PPO_V2_experiment',
-                 seed=0) -> None:
+                 seed:Optional[int]=None) -> None:
 
         # environment
         self.env = env
@@ -298,7 +300,6 @@ class PPO_PolicyGradient:
         self.device = device
         self.normalize_advantage = normalize_adv
         self.normalize_return = normalize_ret
-        self.seed = seed
 
         # keep track of information
         self.exp_path = exp_path
@@ -313,18 +314,17 @@ class PPO_PolicyGradient:
         self.ep_returns = deque(maxlen=max_trajectory_size)
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
-        self.stats_data = {  # logged for CSV file
-            'episodes': [],
-            'training time': [],         # total training time
-            'length per episode': [],    # length of an episode
-            'experiment': [],            # experiment name
-            'timestep': [],              # timesteps 
-            'mean episodic runtime': [], # avg. runtime per episode
-            'mean episodic length': [],  # avg. length per episode
-            'mean episodic returns': [], # avg. returns per episode
-            'min episodic returns': [],  # avg. min return per episode
-            'max episodic returns': [],  # avg. max return per episode
-            'std episodic returns': []   # avg. std per episode
+        self.stats_data = {
+            'mean episodic runtime': [],
+            'mean episodic length': [],
+            'mean episodic returns': [],
+            'min episodic returns': [],
+            'max episodic returns': [],
+            'std episodic returns': [],
+            'eval episodes': [],
+            'experiment name': [],
+            'total trainingsteps': [],
+            'total episodes': [],
         }
         self.stats_drone_data = { "dist_to_start_point": [], "y_position": [], 
                                   "x_velocity": [], "y_velocity": [], "z_velocity": []}
@@ -346,6 +346,7 @@ class PPO_PolicyGradient:
                 self.policy_net.parameters(), lr=self.learning_rate_p, momentum=self.momentum)
             self.value_net_optim = SGD(
                 self.value_net.parameters(), lr=self.learning_rate_v, momentum=self.momentum)
+
 
     def get_continuous_policy(self, obs):
         """Make function to compute action distribution in continuous action space."""
@@ -770,7 +771,7 @@ class PPO_PolicyGradient:
             # log all statistical values to CSV
             self.log_stats(policy_losses, value_losses,
                            rewards, ep_lens, training_steps,
-                           ep_time, time_so_far, done_so_far, exp_name=self.exp_name)
+                           ep_time, time_so_far, done_so_far, self.exp_name)
 
             # store model with checkpoints
             if training_steps % self.save_model == 0:
@@ -853,47 +854,46 @@ class PPO_PolicyGradient:
         video_path = os.path.join(path, filename)
         anim.save(video_path, writer='imagemagick', fps=60)
 
-    def log_stats(self, p_losses, v_losses, batch_return, ep_lens, training_steps, time, time_so_far, done_so_far, exp_name='experiment', smoothing=None):
+    
+    def log_stats(self, p_losses, v_losses, ep_return, ep_lens, total_episodes, ep_time, done_so_far, moving_avg=True, exp_name='exp_name'):
         """Calculate stats and log to W&B, CSV, logger """
-        if torch.is_tensor(batch_return):
-            batch_return = batch_return.detach().numpy()
-
+        if torch.is_tensor(ep_return):
+            ep_return = ep_return.detach().numpy()
         # calculate stats
         mean_p_loss = round(np.mean([np.sum(loss) for loss in p_losses]), 6)
         mean_v_loss = round(np.mean([np.sum(loss) for loss in v_losses]), 6)
 
+        # Last 100 values
+        if moving_avg:
+            ep_return = ep_return[-100:]
         # Calculate the stats of an episode
-        cum_ret = [np.sum(ep_rews) for ep_rews in batch_return]
-        mean_ep_time = round(np.mean(time), 6)
+        cum_ret = [np.sum(ep_rews) for ep_rews in ep_return]
+        mean_ep_time = round(np.mean(ep_time), 6)
         mean_ep_len = round(np.mean(ep_lens), 6)
-
-        # use gaussian smoothing
-        if smoothing:
-            cum_ret = gaussian_filter1d(cum_ret.to_numpy(), sigma=smoothing)
 
         # statistical values for return
         mean_ep_ret = round(np.mean(cum_ret), 6)
         max_ep_ret = round(np.max(cum_ret), 6)
         min_ep_ret = round(np.min(cum_ret), 6)
-        # standard deviation (spread of distribution)
+
+        # calculate standard deviation (spred of distribution)
         std_ep_rew = round(np.std(cum_ret), 6)
 
         # Log stats to CSV file
-        self.stats_data['episodes'].append(done_so_far)
-        self.stats_data['experiment'].append(exp_name)
+        self.stats_data['total episodes'].append(total_episodes)
+        self.stats_data['total trainingsteps'].append(done_so_far)
+        self.stats_data['experiment name'].append(exp_name)
         self.stats_data['mean episodic length'].append(mean_ep_len)
         self.stats_data['mean episodic returns'].append(mean_ep_ret)
         self.stats_data['min episodic returns'].append(min_ep_ret)
         self.stats_data['max episodic returns'].append(max_ep_ret)
-        self.stats_data['std episodic returns'].append(std_ep_rew)
         self.stats_data['mean episodic runtime'].append(mean_ep_time)
-        self.stats_data['length per episode'].append(len(cum_ret))
-        self.stats_data['timestep'].append(training_steps)
-        self.stats_data['training time'].append(time_so_far)
+        self.stats_data['std episodic returns'].append(std_ep_rew)
+        self.stats_data['eval episodes'].append(len(cum_ret))
 
         # Monitoring via W&B
         wandb.log({
-            'train/timesteps': training_steps,
+            'train/timesteps': done_so_far,
             'train/mean policy loss': mean_p_loss,
             'train/mean value loss': mean_v_loss,
             'train/mean episode returns': mean_ep_ret,
@@ -902,18 +902,19 @@ class PPO_PolicyGradient:
             'train/std episode returns': std_ep_rew,
             'train/mean episode runtime': mean_ep_time,
             'train/mean episode length': mean_ep_len,
-            'train/episodes': done_so_far,
+            'train/total episodes': total_episodes,
         })
 
         logging.info('\n')
-        logging.info(f'------------ Episode: {training_steps} --------------')
+        logging.info(f'------------ Episode: {total_episodes} --------------')
         logging.info(f"Max ep_return:        {max_ep_ret}")
         logging.info(f"Min ep_return:        {min_ep_ret}")
         logging.info(f"Mean ep_return:       {mean_ep_ret}")
         logging.info(f"Mean policy loss:     {mean_p_loss}")
         logging.info(f"Mean value loss:      {mean_v_loss}")
-        logging.info('-----------------------------------------------------')
+        logging.info('--------------------------------------------')
         logging.info('\n')
+
 
     def log_drone_stats(self):
         # finally log collected drone values
@@ -938,6 +939,7 @@ class PPO_PolicyGradient:
             for value in self.stats_drone_data.values():
                 del value[:]
 
+
 ####################
 ####################
 
@@ -960,7 +962,7 @@ def arg_parser():
     parser.add_argument("--advantage",              type=str,                           default=DEFAULT_ADV_FUNC,           help="the advantage function to be used (gae, ac, td_ac, reinforce") 
     parser.add_argument("--normalize_adv",          type=lambda x: bool(strtobool(x)),  default=DEFAULT_NORM_ADV,           nargs="?", const=False, help="if toggled, normalize advantage estimate")
     parser.add_argument("--normalize_ret",          type=lambda x: bool(strtobool(x)),  default=DEFAULT_NORM_RET,           nargs="?", const=False, help="if toggled, normalize return")
-    parser.add_argument("--seed",                   type=int, default=1, help="seed of the random number generators")
+    parser.add_argument("--seed",                   type=int,                           default=DEFAULT_SEED, help="seed of the random number generators")
     parser.add_argument("--total_timesteps",        type=int, default=1_000_000, help="total timesteps of the experiments")
     parser.add_argument("--torch_deterministic",    type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda",                   type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
@@ -1026,7 +1028,7 @@ class PPOTrainer:
 
     def __init__(self, 
                 env,
-                total_training_steps=10_000,
+                total_training_steps=100_000,
                 max_trajectory_size=1024,
                 n_rollout_steps=2048,
                 n_optepochs=10,
@@ -1043,14 +1045,14 @@ class PPOTrainer:
                 log_video_steps=10,
                 render_steps=10,
                 render_video=False,
-                device='cpu',
                 advantage_type='gae',
                 normalize_adv=False,
                 normalize_ret=True,
-                deterministic=True, 
-                seed=42, 
+                deterministic=True,
                 project_name='PyBulletGym-Drone',
-                exp_name='exp_name: test') -> None:
+                exp_name='PyBulletGym-test',
+                device='cpu',
+                seed:Optional[int]=None) -> None:
 
         self.env = env
         self.env_name = self.env.unwrapped.spec.id
@@ -1085,13 +1087,18 @@ class PPOTrainer:
 
         # other
         self.deterministic = deterministic
-        self.seed = seed
+        self.seed = self.check_seed(seed)
         self.device = device
 
         # set everything up
-        self.setup_env(seed)
+        self.setup_env(self.seed)
         self.setup_logging()
         self.setup_wb()
+
+    def check_seed(self, seed: Optional[int]=None):
+        if seed is None or seed == 0:
+            seed = np.random.randint(0, 2**32-1)
+        return seed
 
     def setup_env(self, seed=42):
         # seeding for reproducability

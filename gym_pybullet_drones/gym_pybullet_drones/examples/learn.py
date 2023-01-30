@@ -84,7 +84,7 @@ DEFAULT_RECORD_VIDEO = True
 DEFAULT_PLOT = True
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
-DEFAULT_SEED = 0
+DEFAULT_SEED = 42
 DEFAULT_TRAINING_STEPS = 100_000 # just for testing, too short otherwise
 # system defaults
 DEFAULT_CPU = 1
@@ -118,13 +118,14 @@ def run(env_id=DEFAULT_ENV,
         plot=DEFAULT_PLOT,
         colab=DEFAULT_COLAB, 
         record_video=DEFAULT_RECORD_VIDEO, 
-        seed=DEFAULT_SEED,
+        seed:Optional[int]=DEFAULT_SEED,
         cpu=DEFAULT_CPU):
 
     #############################################################
     #### Seed everything for reproducibility ####################
     #############################################################
     
+    seed = check_seed(seed) # place random if none
     random.seed(seed)
     np.random.seed(seed)
 
@@ -396,6 +397,11 @@ def run(env_id=DEFAULT_ENV,
 #######################################
 #######################################
 
+def check_seed(seed: Optional[int]=None):
+    if seed is None or seed == 0:
+        seed = np.random.randint(0, 2**32-1)
+    return seed
+
 def make_env(env_id: Union[str, Type[gym.Env]], act: ActionType=ActionType.RPM, obs: ObservationType=ObservationType.KIN, seed: Optional[int]=None):
     if isinstance(env_id, str):
         env = gym.make(env_id, act=act, obs=obs) # single environment instead of a vectorized one  
@@ -421,7 +427,7 @@ def arg_parser():
     parser.add_argument('--act',                default=DEFAULT_ACT,                type=ActionType,                                        help='Action space (default: one_d_rpm)', metavar='')
     parser.add_argument('--cpu',                default=DEFAULT_CPU,                type=int,                                               help='Number of training environments (default: 1)', metavar='')        
     parser.add_argument('--train_steps',        default=DEFAULT_TRAINING_STEPS,     type=int,                                               help='Select the amount of training steps.')
-    parser.add_argument('--seed',               default=DEFAULT_SEED,               type=int,                                               help='Select seed for reproducability.')
+    parser.add_argument('--seed',               default=DEFAULT_SEED,               type=int,                                               help='Select seed for reproducability. If set 0 select random seeding.')
     parser.add_argument('--colab',              default=DEFAULT_COLAB,              type=bool,                                              help='Whether example is being run by a notebook (default: "False")', metavar='')
 
     # Parse arguments if they are given
