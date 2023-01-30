@@ -167,17 +167,16 @@ def _log_summary(ep_len, ep_ret, ep_num):
 
         # Monitoring via W&B
         wandb.log({
-            'test/timesteps': ep_num,
+            'test/episodes': ep_num,
             'test/episode length': ep_len,
             'test/episode returns': ep_ret
         })
 
 		# Print logging statements
-        logging.info('\n')
         logging.info(f'------------ Episode: {ep_num} --------------')
-        logging.info(f"Episodic Length: {ep_len}")
-        logging.info(f"Episodic Return: {ep_ret}")
-        logging.info(f"--------------------------------------------")
+        logging.info(f"Episodic Length:      {ep_len}")
+        logging.info(f"Episodic Return:      {ep_ret}")
+        logging.info(f"---------------------------------------------")
         logging.info('\n')
 
 def arg_parser():
@@ -220,6 +219,13 @@ def make_env(env_id='Pendulum-v1', gym_wrappers=False, gym_monitor=False, monito
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     return env
+
+
+
+#################################
+#################################
+#################################
+
 
 if __name__ == '__main__':
 

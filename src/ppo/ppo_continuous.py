@@ -68,10 +68,9 @@ DEFAULT_UPDATE_EPOCHS= 64                 # Number of epochs per time step to op
 DEFAULT_LR_P= 1e-4                        # learning rate for policy network
 DEFAULT_LR_V = 1e-3                       # learning rate for value network
 DEFAULT_GAE_LAMBDA = 0.92                 # factor for trade-off of bias vs variance for GAE
-DEFAULT_GAMMA = 0.95                      # discount factor
+DEFAULT_GAMMA = 0.95                      # gamma discount factor
 DEFAULT_ADAM_EPSILON = 1e-7               # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
 DEFAULT_CLIP_RANGE = 0.2                  # clipping factor, default value in PPO baseline implementation is 0.2
-DEFAULT_CLIP_RANGE_V = 0.2                # (NOT USED) clipping factor for the value loss function. Depends on reward scaling.
 DEFAULT_ENV_ID = 'Pendulum-v1'            # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
 DEFAULT_ENV_NUMBER = 1                    # number of actors
 DEFAULT_NORM_ADV = False                  # wether to normalize the advantage estimate
@@ -91,13 +90,14 @@ DEFAULT_CUDA = True
 DEFAULT_TRAIN = False
 DEFAULT_TEST = False
 DEFAULT_HYPERPARAM = False
-DEFAULT_TEST_MODEL_PATH = './models/Pendulum-v1_2023-01-01_policyNet.pth'
+DEFAULT_TEST_MODEL_PATH = './models/Pendulum-v1_2023-01-03_policyNet.pth'
 
 # Paths and other constants
 DEFAULT_MODEL_PATH = './models/'
 DEFAULT_LOG_PATH = './log/'
 DEFAULT_VIDEO_PATH = './video/'
 DEFAULT_RESULTS_PATH = './results/'
+
 
 
 ####################
@@ -174,95 +174,9 @@ class PolicyNet(Net):
         return policy_loss.mean()  # return mean
 
 
+
 ####################
 ####################
-
-class PPO_PolicyGradient_V1:
-
-    def __init__(self,
-                 env,
-                 in_dim,
-                 out_dim,
-                 total_training_steps,
-                 max_trajectory_size,
-                 n_rollout_steps,
-                 n_optepochs=5,
-                 lr_p=1e-3,
-                 lr_v=1e-3,
-                 gae_lambda=0.95,
-                 gamma=0.99,
-                 epsilon=0.22,
-                 adam_eps=1e-5,
-                 momentum=0.9,
-                 adam=True,
-                 render_steps=10,
-                 render_video=False,
-                 save_model=10,
-                 csv_writer=None,
-                 stats_plotter=None,
-                 log_video=False,
-                 device='cpu') -> None:
-
-        # hyperparams
-        self.in_dim = in_dim
-        self.out_dim = out_dim
-        self.total_training_steps = total_training_steps
-        self.max_trajectory_size = max_trajectory_size
-        self.n_rollout_steps = n_rollout_steps
-        self.n_optepochs = n_optepochs
-        self.lr_p = lr_p
-        self.lr_v = lr_v
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.adam_eps = adam_eps
-        self.gae_lambda = gae_lambda
-        self.momentum = momentum
-        self.adam = adam
-
-        # environment
-        self.env = env
-        self.render_steps = render_steps
-        self.render_video = render_video
-        self.save_model = save_model
-        self.device = device
-
-        # track video of gym
-        self.log_video = log_video
-
-        # keep track of rewards per episode
-        self.ep_returns = deque(maxlen=max_trajectory_size)
-        self.csv_writer = csv_writer
-        self.stats_plotter = stats_plotter
-        self.stats_data = {
-            'experiment': [],
-            'timestep': [],
-            'mean episodic runtime': [],
-            'mean episodic length': [],
-            'eval episodes': [],
-            'mean episodic returns': [],
-            'min episodic returns': [],
-            'max episodic returns': [],
-            'std episodic returns': [],
-            'episodes': []
-        }
-
-        # add net for actor and critic
-        # Setup Policy Network (Actor) - (policy-based method) "How the agent behaves"
-        self.policy_net = PolicyNet(self.in_dim, self.out_dim)
-        # Setup Value Network (Critic) -  (value-based method) "How good the action taken is."
-        self.value_net = ValueNet(self.in_dim, 1)
-
-        # add optimizer for actor and critic
-        if self.adam:
-            self.policy_net_optim = Adam(self.policy_net.parameters(
-            ), lr=self.lr_p, eps=self.adam_eps)  # Setup Policy Network (Actor) optimizer
-            self.value_net_optim = Adam(self.value_net.parameters(
-            ), lr=self.lr_v, eps=self.adam_eps)  # Setup Value Network (Critic) optimizer
-        else:
-            self.policy_net_optim = SGD(
-                self.policy_net.parameters(), lr=self.lr_p, momentum=self.momentum)
-            self.value_net_optim = SGD(
-                self.value_net.parameters(), lr=self.lr_v, momentum=self.momentum)
 
 
 class PPO_PolicyGradient_V2:
@@ -300,7 +214,7 @@ class PPO_PolicyGradient_V2:
                  env,
                  in_dim,
                  out_dim,
-                 total_training_steps,
+                 train_steps,
                  max_trajectory_size,
                  n_rollout_steps,
                  n_optepochs=5,
@@ -328,7 +242,7 @@ class PPO_PolicyGradient_V2:
         # hyperparams
         self.in_dim = in_dim
         self.out_dim = out_dim
-        self.total_training_steps = total_training_steps
+        self.train_steps = train_steps
         self.max_trajectory_size = max_trajectory_size
         self.n_rollout_steps = n_rollout_steps
         self.n_optepochs = n_optepochs
@@ -362,16 +276,16 @@ class PPO_PolicyGradient_V2:
         self.csv_writer = csv_writer
         self.stats_plotter = stats_plotter
         self.stats_data = {
-            'experiment': [],
-            'timestep': [],
             'mean episodic runtime': [],
             'mean episodic length': [],
-            'eval episodes': [],
             'mean episodic returns': [],
             'min episodic returns': [],
             'max episodic returns': [],
             'std episodic returns': [],
-            'episodes': [],
+            'eval episodes': [],
+            'experiment name': [],
+            'total trainingsteps': [],
+            'total episodes': [],
         }
 
         # add net for actor and critic
@@ -382,11 +296,13 @@ class PPO_PolicyGradient_V2:
 
         # add optimizer for actor and critic
         if self.adam:
+            logging.info("Selected Adam optimizer...")
             self.policy_net_optim = Adam(self.policy_net.parameters(
             ), lr=self.lr_p, eps=self.adam_eps)  # Setup Policy Network (Actor) optimizer
             self.value_net_optim = Adam(self.value_net.parameters(
             ), lr=self.lr_v, eps=self.adam_eps)  # Setup Value Network (Critic) optimizer
         else:
+            logging.info("Selected SGD optimizer...")
             self.policy_net_optim = SGD(
                 self.policy_net.parameters(), lr=self.lr_p, momentum=self.momentum)
             self.value_net_optim = SGD(
@@ -547,6 +463,10 @@ class PPO_PolicyGradient_V2:
         # TD error: A(s,a) = r + (gamma * V(s_t+1)) - V(s_t)
         last_values = values[-1]
         for i in reversed(range(len(cum_returns))):
+            
+            # mask = 1.0 - dones[i]
+            # last_values = last_values * mask
+
             # TD residual of V with discount gamma
             # δ_t = r_t + γ * V(s_t+1) − V(s_t)
             delta = cum_returns[i] + (self.gamma * last_values) - values[i]
@@ -584,6 +504,12 @@ class PPO_PolicyGradient_V2:
         prev_advantage = 0
         last_values = values[-1]
         for i in reversed(range(len(cum_returns))):
+            
+            # masking
+            # mask = 1.0 - dones[i]
+            # last_values = last_values * mask
+            # prev_advantage = prev_advantage * mask
+            
             # TD residual of V with discount gamma
             # δ_t = r_t + γ * V(s_t+1) − V(s_t)
             delta = cum_returns[i] + (self.gamma * last_values) - values[i]
@@ -599,8 +525,9 @@ class PPO_PolicyGradient_V2:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
+
     def generalized_advantage_estimate_2(self, obs, next_obs, episode_rewards, dones, normalized_adv=False, normalized_ret=False):
-        """ Generalized Advantage Estimate calculation
+        """ (OLD only for comparison) Generalized Advantage Estimate calculation
             - GAE defines advantage as a weighted average of A_t
             - advantage measures if an action is better or worse than the policy's default behavior
             - want to find the maximum Advantage representing the benefit of choosing a specific action
@@ -618,9 +545,10 @@ class PPO_PolicyGradient_V2:
             prev_advantage = 0
             returns_current = ns_values[-1]  # V(s_t+1)
             for i in reversed(range(len(rewards))):
-                # STEP 5: compute advantage estimates A_t at step t
+                # masking
                 mask = (1.0 - dones[i])
                 gamma = self.gamma * mask
+                # STEP 5: compute advantage estimates A_t at step t
                 td_target = rewards[i] + (gamma * ns_values[i])
                 td_error = td_target - s_values[i]
                 # A_t = δ_t + γ * λ * A(t+1)
@@ -636,8 +564,6 @@ class PPO_PolicyGradient_V2:
             cum_returns = self.normalize_ret(cum_returns)
         advantages = torch.tensor(
             np.array(advantages), device=self.device, dtype=torch.float)
-        returns = torch.tensor(
-            np.array(returns), device=self.device, dtype=torch.float)
         return advantages, returns
 
     def normalize_adv(self, advantages):
@@ -650,9 +576,9 @@ class PPO_PolicyGradient_V2:
     def finish_episode(self):
         pass
 
-    def collect_rollout(self, n_steps=1):
+    def collect_rollout(self, n_rollout_steps=1):
         """Collect a batch of simulated data each time we iterate the actor/critic network (on-policy)
-           # TODO: rollout length - 2048 t0 4096
+           General rollout length - 2048 t0 4096
         """
 
         t_step, rewards, frames = 0, [], deque(maxlen=24)  # 4 fps - 6 sec
@@ -669,9 +595,9 @@ class PPO_PolicyGradient_V2:
         episode_rewards = []
         episode_lens = []
 
-        # Run Monte Carlo simulation for n timesteps per batch
-        logging.info(f"Collecting trajectories for {n_steps} episodes.")
-        while t_step < n_steps:
+        # Run Monte Carlo simulation for n rollout steps
+        logging.info(f"Collecting trajectories for {n_rollout_steps} rollout steps.")
+        while t_step < n_rollout_steps:
 
             # rewards collected
             rewards, done, frames = [], False, []
@@ -741,7 +667,6 @@ class PPO_PolicyGradient_V2:
 
     def train(self, values, returns, advantages, batch_log_probs, curr_log_probs, epsilon):
         """Calculate loss and update weights of both networks."""
-        logging.info("Updating network parameter...")
         # loss of the policy network
         self.policy_net_optim.zero_grad()  # reset optimizer
         policy_loss = self.policy_net.loss(
@@ -761,26 +686,26 @@ class PPO_PolicyGradient_V2:
         """"""
         training_steps = 0
         done_so_far = 0
-        while training_steps < self.total_training_steps:
+        while training_steps < self.train_steps:
             policy_losses, value_losses = [], []
 
             # Collect data over one episode
-            # Episode = recording of actions and states that an agent performed from a start state to an end state
+            # Episode: recording of actions and states that an agent performed from a start state to an end state
             # STEP 3: simulate and collect trajectories --> the following values are all per batch over one episode
             obs, next_obs, actions, batch_log_probs, dones, rewards, ep_lens, ep_time, frames = self.collect_rollout(
-                n_steps=self.n_rollout_steps)
+                 n_rollout_steps=self.n_rollout_steps)
 
             # experiences simulated so far
             training_steps += np.sum(ep_lens)
 
             # STEP 4-5: Calculate cummulated reward and advantage at timestep t_step
             values, _, _ = self.get_values(obs, actions)
+            
             # Calculate advantage function
             # advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(
-            ), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
 
             # update network params
             logging.info(
@@ -846,13 +771,10 @@ class PPO_PolicyGradient_V2:
         # Finalize and plot stats
         if self.stats_plotter:
             df = self.stats_plotter.read_csv()  # read all files in folder
-            self.stats_plotter.plot_seaborn_fill(df, x='timestep', y='mean episodic returns',
+            self.stats_plotter.plot_seaborn_fill(df, x='total trainingsteps', y='mean episodic returns',
                                                  y_min='min episodic returns', y_max='max episodic returns',
                                                  title=f'{env_id}', x_label='Timestep', y_label='Mean Episodic Return',
-                                                 color='blue', smoothing=6, wandb=wandb, xlim_up=self.total_training_steps)
-
-            # self.stats_plotter.plot_box(df, x='timestep', y='mean episodic runtime',
-            #                             title='title', x_label='Timestep', y_label='Mean Episodic Time', wandb=wandb)
+                                                 color='blue', smoothing=6, wandb=wandb, xlim_up=self.train_steps)
         if wandb:
             # save files in path
             wandb.save(os.path.join(self.exp_path, "*csv"))
@@ -876,7 +798,7 @@ class PPO_PolicyGradient_V2:
         video_path = os.path.join(path, filename)
         anim.save(video_path, writer='imagemagick', fps=60)
 
-    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, training_steps, time, done_so_far, exp_name='experiment'):
+    def log_stats(self, p_losses, v_losses, batch_return, episode_lens, total_episodes, ep_time, done_so_far, exp_name='experiment name'):
         """Calculate stats and log to W&B, CSV, logger """
         if torch.is_tensor(batch_return):
             batch_return = batch_return.detach().numpy()
@@ -886,7 +808,7 @@ class PPO_PolicyGradient_V2:
 
         # Calculate the stats of an episode
         cum_ret = [np.sum(ep_rews) for ep_rews in batch_return]
-        mean_ep_time = round(np.mean(time), 6)
+        mean_ep_time = round(np.mean(ep_time), 6)
         mean_ep_len = round(np.mean(episode_lens), 6)
 
         # statistical values for return
@@ -898,8 +820,9 @@ class PPO_PolicyGradient_V2:
         std_ep_rew = round(np.std(cum_ret), 6)
 
         # Log stats to CSV file
-        self.stats_data['episodes'].append(done_so_far)
-        self.stats_data['experiment'].append(exp_name)
+        self.stats_data['total episodes'].append(total_episodes)
+        self.stats_data['total trainingsteps'].append(done_so_far)
+        self.stats_data['experiment name'].append(exp_name)
         self.stats_data['mean episodic length'].append(mean_ep_len)
         self.stats_data['mean episodic returns'].append(mean_ep_ret)
         self.stats_data['min episodic returns'].append(min_ep_ret)
@@ -907,11 +830,10 @@ class PPO_PolicyGradient_V2:
         self.stats_data['mean episodic runtime'].append(mean_ep_time)
         self.stats_data['std episodic returns'].append(std_ep_rew)
         self.stats_data['eval episodes'].append(len(cum_ret))
-        self.stats_data['timestep'].append(training_steps)
 
         # Monitoring via W&B
         wandb.log({
-            'train/timesteps': training_steps,
+            'train/timesteps': done_so_far,
             'train/mean policy loss': mean_p_loss,
             'train/mean value loss': mean_v_loss,
             'train/mean episode returns': mean_ep_ret,
@@ -920,11 +842,11 @@ class PPO_PolicyGradient_V2:
             'train/std episode returns': std_ep_rew,
             'train/mean episode runtime': mean_ep_time,
             'train/mean episode length': mean_ep_len,
-            'train/episodes': done_so_far,
+            'train/total episodes': total_episodes,
         })
 
         logging.info('\n')
-        logging.info(f'------------ Episode: {training_steps} --------------')
+        logging.info(f'------------ Episode: {total_episodes} --------------')
         logging.info(f"Max ep_return:        {max_ep_ret}")
         logging.info(f"Min ep_return:        {min_ep_ret}")
         logging.info(f"Mean ep_return:       {mean_ep_ret}")
@@ -937,10 +859,8 @@ class PPO_PolicyGradient_V2:
 ####################
 
 
-def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=42):
-    # TODO: Needs to be parallized for parallel simulation
+def make_env(env_id='Pendulum-v1', gym_wrappers=False, seed=0):
     env = gym.make(env_id)
-
     # gym wrapper
     if gym_wrappers:
         env = gym.wrappers.ClipAction(env)
@@ -972,61 +892,50 @@ def create_path(path: str) -> None:
         os.makedirs(path)
 
 def load_model(path, model, device='cpu'):
+    logging.info(f"Loading model weights from {path}...")
     checkpoint = torch.load(path)
-    model.load_state_dict(checkpoint['model_state_dict'], map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
     return model
 
-def simulate_rollout(policy_net, env, render_video=True):
-    # Rollout until user kills process
+def simulate_rollout(policy_net, env, n_rollout_steps=2048, render_video=True):
+    """Simulate rollout until process is interrupted."""
     while True:
-        obs = env.reset()
-        done = False
-
-        # number of timesteps so far
-        t = 0
-
+        obs, done = env.reset(), False
         # Logging data
-        ep_len = 0            # episodic length
-        ep_ret = 0            # episodic return
-
+        steps_so_far = 0
+        ep_len, ep_ret = 0, 0
+        
         while not done:
-            t += 1
-
-            # Render environment if specified, off by default
+            steps_so_far += 1
+            # render environment
             if render_video:
                 env.render()
-
-            # Query deterministic action from policy and run it
+            # query action from policy
             action = policy_net(obs).detach().numpy()
-            obs, rew, done, _ = env.step(action)
+            obs, reward, done, _ = env.step(action)
+            # Sum all episodic rewards
+            ep_ret += reward
 
-            # Sum all episodic rewards as we go along
-            ep_ret += rew
-
-        # Track episodic length
-        ep_len = t
-
-        # returns episodic length and return in this iteration
+        ep_len = steps_so_far
+        # returns episodic length and return 
         yield ep_len, ep_ret
 
 def _log_summary(ep_len, ep_ret, ep_num):
 
     # Monitoring via W&B
     wandb.log({
-        'test/timesteps': ep_num,
+        'test/episode': ep_num,
         'test/episode length': ep_len,
         'test/episode returns': ep_ret
     })
-
-        # Print logging statements
-    logging.info('\n')
+    # Print logging statements
     logging.info(f'------------ Episode: {ep_num} --------------')
-    logging.info(f"Episodic Length: {ep_len}")
-    logging.info(f"Episodic Return: {ep_ret}")
-    logging.info(f"--------------------------------------------")
+    logging.info(f"Episodic Length:      {ep_len}")
+    logging.info(f"Episodic Return:      {ep_ret}")
+    logging.info(f"---------------------------------------------")
     logging.info('\n')
 
-def train(env, in_dim, out_dim, total_training_steps, max_trajectory_size=512, n_rollout_steps=2048,
+def train(env, in_dim, out_dim, train_steps, max_trajectory_size=512, n_rollout_steps=2048,
           n_optepochs=32, learning_rate_p=1e-4, learning_rate_v=1e-3, gae_lambda=0.95, gamma=0.99, epsilon=0.2,
           adam_epsilon=1e-8, render_steps=10, render_video=False, save_steps=10, csv_writer=None, stats_plotter=None,
           normalize_adv=False, normalize_ret=False, log_video=False, video_log_steps=1000, ppo_version='v2', 
@@ -1038,7 +947,7 @@ def train(env, in_dim, out_dim, total_training_steps, max_trajectory_size=512, n
                     env, 
                     in_dim=in_dim, 
                     out_dim=out_dim,
-                    total_training_steps=total_training_steps,
+                    train_steps=train_steps,
                     max_trajectory_size=max_trajectory_size,
                     n_rollout_steps=n_rollout_steps,
                     n_optepochs=n_optepochs,
@@ -1082,7 +991,7 @@ def hyperparam_tuning(env, config=None):
                 env,
                 in_dim=config.obs_dim, 
                 out_dim=config.act_dim,
-                total_training_steps=config.total_training_steps,
+                train_steps=config.train_steps,
                 max_trajectory_size=config.max_trajectory_size,
                 n_rollout_steps=config.n_rollout_steps,
                 n_optepochs=config.n_optepochs,
@@ -1103,7 +1012,7 @@ def run(env_id=DEFAULT_ENV_ID,
         video_path=DEFAULT_VIDEO_PATH,
         log_path=DEFAULT_LOG_PATH,
         results_path=DEFAULT_RESULTS_PATH,
-        total_training_steps=DEFAULT_TRAINING_STEPS,
+        train_steps=DEFAULT_TRAINING_STEPS,
         max_trajectory_size=DEFAULT_MAX_TRAJECTORY_SIZE,
         n_rollout_steps=DEFAULT_ROLLOUT_STEPS,
         learning_rate_p=DEFAULT_LR_P,
@@ -1193,7 +1102,7 @@ def run(env_id=DEFAULT_ENV_ID,
                 config={ # stores hyperparams in job
                     'env name': env_id,
                     'env number': env_number,
-                    'total_training_steps': total_training_steps,
+                    'train_steps': train_steps,
                     'max sampled trajectories': max_trajectory_size,
                     'batches per episode': n_rollout_steps,
                     'number of epochs for update': n_optepochs,
@@ -1226,7 +1135,7 @@ def run(env_id=DEFAULT_ENV_ID,
         train(env,
             in_dim=obs_dim, 
             out_dim=act_dim,
-            total_training_steps=total_training_steps,
+            train_steps=train_steps,
             max_trajectory_size=max_trajectory_size,
             n_rollout_steps=n_rollout_steps,
             n_optepochs=n_optepochs,
@@ -1297,7 +1206,7 @@ def run(env_id=DEFAULT_ENV_ID,
                                     project=project_name,
                                     entity='drone-mechanics',
                                     sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
+                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
                                         'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                         'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                         'learning rate (policy net)': val[i],'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1313,7 +1222,7 @@ def run(env_id=DEFAULT_ENV_ID,
                         train(env,
                             in_dim=obs_dim, 
                             out_dim=act_dim,
-                            total_training_steps=total_training_steps,
+                            train_steps=train_steps,
                             learning_rate_p=val[i],
                             exp_path=exp_folder_name,
                             exp_name=exp_name,
@@ -1349,7 +1258,7 @@ def run(env_id=DEFAULT_ENV_ID,
                                     project=project_name,
                                     entity='drone-mechanics',
                                     sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
+                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
                                         'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                         'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                         'learning rate (policy net)': learning_rate_p,'learning rate (value net)': val[i],'epsilon (adam optimizer)': adam_epsilon,
@@ -1365,7 +1274,7 @@ def run(env_id=DEFAULT_ENV_ID,
                         train(env,
                             in_dim=obs_dim, 
                             out_dim=act_dim,
-                            total_training_steps=total_training_steps,
+                            train_steps=train_steps,
                             learning_rate_v=val[i],
                             exp_path=exp_folder_name,
                             exp_name=exp_name,
@@ -1401,7 +1310,7 @@ def run(env_id=DEFAULT_ENV_ID,
                                     project=project_name,
                                     entity='drone-mechanics',
                                     sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
+                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
                                         'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                         'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                         'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1417,7 +1326,7 @@ def run(env_id=DEFAULT_ENV_ID,
                         train(env,
                             in_dim=obs_dim, 
                             out_dim=act_dim,
-                            total_training_steps=total_training_steps,
+                            train_steps=train_steps,
                             gamma=val[i],
                             exp_path=exp_folder_name,
                             exp_name=exp_name,
@@ -1453,7 +1362,7 @@ def run(env_id=DEFAULT_ENV_ID,
                                     project=project_name,
                                     entity='drone-mechanics',
                                     sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
+                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
                                         'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                         'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                         'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1469,7 +1378,7 @@ def run(env_id=DEFAULT_ENV_ID,
                         train(env,
                             in_dim=obs_dim, 
                             out_dim=act_dim,
-                            total_training_steps=total_training_steps,
+                            train_steps=train_steps,
                             epsilon=val[i],
                             exp_path=exp_folder_name,
                             exp_name=exp_name,
@@ -1505,7 +1414,7 @@ def run(env_id=DEFAULT_ENV_ID,
                                     project=project_name,
                                     entity='drone-mechanics',
                                     sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
+                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
                                         'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                         'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                         'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1522,7 +1431,7 @@ def run(env_id=DEFAULT_ENV_ID,
                         train(env,
                             in_dim=obs_dim, 
                             out_dim=act_dim,
-                            total_training_steps=total_training_steps,
+                            train_steps=train_steps,
                             gae_lambda=val[i],
                             exp_path=exp_folder_name,
                             exp_name=exp_name,
@@ -1558,7 +1467,7 @@ def run(env_id=DEFAULT_ENV_ID,
                                     project=project_name,
                                     entity='drone-mechanics',
                                     sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
+                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
                                         'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                         'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                         'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': val[i],
@@ -1575,7 +1484,7 @@ def run(env_id=DEFAULT_ENV_ID,
                         train(env,
                             in_dim=obs_dim, 
                             out_dim=act_dim,
-                            total_training_steps=total_training_steps,
+                            train_steps=train_steps,
                             adam_epsilon=val[i],
                             exp_path=exp_folder_name,
                             exp_name=exp_name,
@@ -1611,7 +1520,7 @@ def run(env_id=DEFAULT_ENV_ID,
                                     project=project_name,
                                     entity='drone-mechanics',
                                     sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': max_trajectory_size,
+                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': max_trajectory_size,
                                         'batches per episode': n_rollout_steps,'number of epochs for update': val[i],'input layer size': obs_dim,'output layer size': act_dim,
                                         'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                         'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1628,7 +1537,7 @@ def run(env_id=DEFAULT_ENV_ID,
                         train(env,
                             in_dim=obs_dim, 
                             out_dim=act_dim,
-                            total_training_steps=total_training_steps,
+                            train_steps=train_steps,
                             n_optepochs=val[i],
                             exp_path=exp_folder_name,
                             exp_name=exp_name,
@@ -1664,7 +1573,7 @@ def run(env_id=DEFAULT_ENV_ID,
                                     project=project_name,
                                     entity='drone-mechanics',
                                     sync_tensorboard=True,
-                                    config={ 'env name': env_id, 'env number': env_number, 'total_training_steps': total_training_steps, 'max sampled trajectories': val[i],
+                                    config={ 'env name': env_id, 'env number': env_number, 'train_steps': train_steps, 'max sampled trajectories': val[i],
                                         'batches per episode': n_rollout_steps,'number of epochs for update': n_optepochs,'input layer size': obs_dim,'output layer size': act_dim,
                                         'observation space': obs_shape,'action space': act_shape,'action space upper bound': upper_bound,'action space lower bound': lower_bound,
                                         'learning rate (policy net)': learning_rate_p,'learning rate (value net)': learning_rate_v,'epsilon (adam optimizer)': adam_epsilon,
@@ -1681,7 +1590,7 @@ def run(env_id=DEFAULT_ENV_ID,
                         train(env,
                             in_dim=obs_dim, 
                             out_dim=act_dim,
-                            total_training_steps=total_training_steps,
+                            train_steps=train_steps,
                             max_trajectory_size=val[i],
                             exp_path=exp_folder_name,
                             exp_name=exp_name,
@@ -1730,9 +1639,10 @@ def arg_parser():
     parser.add_argument("--env_id",                 type=str,                           default=DEFAULT_ENV_ID,             help="the id of the gym environment")
     parser.add_argument("--learning_rate_v",        type=float,                         default=DEFAULT_LR_V,               help="the learning rate of the value network")
     parser.add_argument("--learning_rate_p",        type=float,                         default=DEFAULT_LR_P,               help="the learning rate of the policy network")
-    parser.add_argument("--adam_epsilon",           type=float,                         default=DEFAULT_ADAM_EPSILON,       help="the learning rate of the optimizer")
+    parser.add_argument("--normalize_ret",          type=lambda x: bool(strtobool(x)),  default=DEFAULT_NORM_RET,           nargs="?", const=False, help="default True, if toggled, normalize returns")
+    parser.add_argument("--normalize_adv",          type=lambda x: bool(strtobool(x)),  default=DEFAULT_NORM_ADV,           nargs="?", const=False, help="default False, if toggled, normalize returns")
     parser.add_argument("--seed",                   type=int,                           default=DEFAULT_SEED,               help="seed of the experiment")
-    parser.add_argument("--total_training_steps",   type=int,                           default=DEFAULT_TRAINING_STEPS,     help="total timesteps of the experiments")
+    parser.add_argument("--train_steps",            type=int,                           default=DEFAULT_TRAINING_STEPS,     help="total timesteps of the experiments")
     parser.add_argument("--torch_deterministic",    type=lambda x: bool(strtobool(x)),  default=True, nargs="?", const=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda",                   type=lambda x: bool(strtobool(x)),  default=True, nargs="?", const=True, help="if toggled, cuda will be enabled by default")
 

@@ -64,7 +64,7 @@ class StatsPlotter:
     def plot_box(self, dataframe, x, y, title='title', x_label='Timestep', y_label='Mean Episodic Time', wandb=None):
         """Create a box plot for time needed to converge per experiment."""     
         # get exp names
-        df_exp = dataframe['experiment'].values.astype('str')
+        df_exp = dataframe['experiment name'].values.astype('str')
         df_exp_unique = list(dict.fromkeys(df_exp))
         # plot boxes
         ax = sns.barplot(data=dataframe, x=x, y=y)
@@ -90,7 +90,7 @@ class StatsPlotter:
         df_x = dataframe[x].to_numpy(dtype=int)
         df_y = gaussian_filter1d(dataframe[y].to_numpy(), sigma=smoothing)
         # get exp names
-        df_exp = dataframe['experiment'].values.astype('str')
+        df_exp = dataframe['experiment name'].values.astype('str')
         df_exp_unique = list(dict.fromkeys(df_exp))
 
         # random colour generator

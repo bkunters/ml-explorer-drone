@@ -481,7 +481,7 @@ class PPO_PolicyGradient:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def advantage_TD_actor_critic(self, ep_rewards, values, normalized_adv=False, normalized_ret=False):
+    def advantage_TD_actor_critic(self, ep_rewards, values, dones, normalized_adv=False, normalized_ret=False):
         """ Advantage TD Actor-Critic 
             TD Error = δ_t = r_t + γ * V(s_t+1) − V(s_t)
             TD Error is used as an estimator for the advantage function
@@ -501,6 +501,8 @@ class PPO_PolicyGradient:
         # TD error: A(s,a) = r + (gamma * V(s_t+1)) - V(s_t)
         last_values = values[-1]
         for i in reversed(range(len(cum_returns))):
+            mask = 1.0 - dones[i]
+            last_values = last_values * mask
             # TD residual of V with discount gamma
             # δ_t = r_t + γ * V(s_t+1) − V(s_t)
             delta = cum_returns[i] + (self.gamma * last_values) - values[i]
@@ -512,7 +514,7 @@ class PPO_PolicyGradient:
             advantages = self.normalize_adv(advantages)
         return advantages, cum_returns
 
-    def generalized_advantage_estimate(self, ep_rewards, values, normalized_adv=False, normalized_ret=False):
+    def generalized_advantage_estimate(self, ep_rewards, values, dones, normalized_adv=False, normalized_ret=False):
         """ The Generalized Advanatage Estimate
             δ_t = r_t + γ * V(s_t+1) − V(s_t)
             A_t = δ_t + γ * λ * A(t+1)
@@ -538,6 +540,9 @@ class PPO_PolicyGradient:
         prev_advantage = 0
         last_values = values[-1]
         for i in reversed(range(len(cum_returns))):
+            mask = 1.0 - dones[i]
+            last_values = last_values * mask
+            prev_advantage = prev_advantage * mask
             # TD residual of V with discount gamma
             # δ_t = r_t + γ * V(s_t+1) − V(s_t)
             delta = cum_returns[i] + (self.gamma * last_values) - values[i]
@@ -626,8 +631,8 @@ class PPO_PolicyGradient:
         episode_rewards = []
         episode_lens = []
 
-        # Run Monte Carlo simulation for n timesteps per batch
-        logging.info(f"Collecting trajectories for {n_rollout_steps} episodes.")
+        # Run Monte Carlo simulation for n rollout steps
+        logging.info(f"Collecting trajectories for {n_rollout_steps} rollout steps.")
         while t_step < n_rollout_steps:
 
             # rewards collected
@@ -738,16 +743,11 @@ class PPO_PolicyGradient:
             values, _, _ = self.get_values(obs, actions)
             
             # Calculate advantage function
-            if self.advantage == 'gae':
-                advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            elif self.advantage == 'reinforce':
-                advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            elif self.advantage == 'ac':
-                advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            elif self.advantage == 'td_ac':
-                advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            else:
-                AssertionError('Incorrect advantage function selected! select --advantage [gae, reinforce, ac, td_ac]') 
+            advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), dones, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            
+            # advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), dones, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
 
             # update network params
             logging.info(f"Updating network parameter for {self.n_optepochs} epochs.")

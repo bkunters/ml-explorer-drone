@@ -191,7 +191,7 @@ class PPO_PolicyGradient:
                 cum_rewards.insert(0, discounted_reward)
         return torch.tensor(cum_rewards, dtype=torch.float)
 
-    def advantage_estimate(self, returns, values, normalized=True):
+    def actor_critic_advantage_estimate(self, returns, values, normalized=True):
         """Simplest advantage calculation"""
         # STEP 5: compute advantage estimates A_t at step t
         advantages = returns - values
@@ -206,9 +206,6 @@ class PPO_PolicyGradient:
         advantages = []
         last_value = values[-1] # V(s_t+1)
         for i in reversed(range(returns)):
-            mask = 0.5
-            last_value = last_value * mask
-            last_advantage = last_advantage * mask
             delta = returns[i] + self.gamma * last_value - values[i]
             last_advantage = delta + self.gamma * self.lambda_ * last_advantage
             advantages.inser(0, last_advantage)
@@ -333,7 +330,7 @@ class PPO_PolicyGradient:
 
             # STEP 5: compute advantage estimates A_t at timestep t_step
             values, _ , _ = self.get_values(obs, actions)
-            advantages = self.advantage_estimate(cum_return, values.detach())
+            advantages = self.actor_critic_advantage_estimate(cum_return, values.detach())
 
             # update network params 
             for _ in range(self.noptepochs):
@@ -448,7 +445,7 @@ if __name__ == '__main__':
     
     # Hyperparameter
     unity_file_name = ''            # name of unity environment
-    total_steps = 30000000          # time steps to train agent
+    total_steps = 3_0000_000        # time steps to train agent
     max_trajectory_size = 1000      # max number of trajectory samples to be sampled per time step. 
     trajectory_iterations = 4600    # number of batches of episodes
     noptepochs = 5                  # Number of epochs per time step to optimize the neural networks
@@ -457,8 +454,6 @@ if __name__ == '__main__':
     gamma = 0.99                    # discount factor
     adam_epsilon = 1e-8             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
     epsilon = 0.2                   # clipping factor
-    value_loss_coef = 0.0           # TODO: Dummy value
-    entropy_bonus_coef = 0.0        # TODO: Dummy value
     env_name = 'LunarLander-v2'     # name of OpenAI gym environment other: 'CartPole-v1' , 'LunarLander-v2'
     seed = 42                       # seed gym, env, torch, numpy 
     
