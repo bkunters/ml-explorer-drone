@@ -54,7 +54,7 @@ Select a training from scratch with optional flags (--algo, --train_steps, --env
 
 - ```$ python learn.py --env_id "takeoff" --algo "ppo_v2" --train_steps 400_000```
 
-## 3. Custom implementation [PPO_V1, PPO_V2]
+## 3. Custom implementation [PPO_V2]
 
 [1] Installation
 
