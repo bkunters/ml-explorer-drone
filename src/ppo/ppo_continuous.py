@@ -709,7 +709,7 @@ class PPO_PolicyGradient_V2:
             # Calculate advantage function
             # advantages, cum_returns = self.advantage_reinforce(rewards, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             # advantages, cum_returns = self.advantage_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
-            # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
+            # advantages, cum_returns = self.advantage_TD_actor_critic(rewards, values.detach(), dones, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
             advantages, cum_returns = self.generalized_advantage_estimate(rewards, values.detach(), dones, normalized_adv=self.normalize_advantage, normalized_ret=self.normalize_return)
 
             # update network params
@@ -860,6 +860,7 @@ class PPO_PolicyGradient_V2:
         logging.info('--------------------------------------------')
         logging.info('\n')
 
+
 ####################
 ####################
 
@@ -940,6 +941,12 @@ def _log_summary(ep_len, ep_ret, ep_num):
     logging.info(f"---------------------------------------------")
     logging.info('\n')
 
+
+
+####################
+####################
+
+
 def train(env, in_dim, out_dim, train_steps, max_trajectory_size=512, n_rollout_steps=2048,
           n_optepochs=32, learning_rate_p=1e-4, learning_rate_v=1e-3, gae_lambda=0.95, gamma=0.99, epsilon=0.2,
           adam_epsilon=1e-8, render_steps=10, render_video=False, save_steps=10, csv_writer=None, stats_plotter=None,
@@ -990,6 +997,10 @@ def test(path, env, in_dim, out_dim, steps=10_000, render_video=True, log_video=
         if log_video:
             wandb.log({"test/video": wandb.Video(DEFAULT_VIDEO_PATH, caption='episode: '+str(ep_num), fps=4, format="gif"), "step": ep_num})
 
+
+####################
+####################
+
 def hyperparam_tuning(env, config=None):
     # set config
     with wandb.init(config=config):
@@ -1010,6 +1021,10 @@ def hyperparam_tuning(env, config=None):
 
         # run training for a total amount of steps
         agent.learn()
+
+
+####################
+####################
 
 
 def run(env_id=DEFAULT_ENV_ID,

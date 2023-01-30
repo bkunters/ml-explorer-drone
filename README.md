@@ -53,7 +53,7 @@ Then register the custom PyBullet environemnts:
 The default is the custom _PPO_v2_ algorithm with takeoff-aviary-v0 environment.
 Select a training from scratch with optional flags (--algo, --train_steps, --env_id):
 
-- ```$ python learn.py --env_id "takeoff" --algo "ppo_v2" --train_steps 100_000```
+- ```$ python learn.py --env_id "takeoff" --algo "ppo_v2" --train_steps 400_000```
 
 ## 3. Custom implementation [PPO_V1, PPO_V2]
 
@@ -69,7 +69,7 @@ Run training from scratch with PPO and GAE.
 Select optinal flags (--train_steps, --normalize_ret, --normalize_adv, --env_id, --project_name, --exp_name)
 
 - ```$ cd src/ppo```
-- ```python ppo_continuous.py --run_train True --train_steps 100_000```
+- ```python ppo_continuous.py --run_train True --train_steps 400_000```
 
 [3] Evaluation
 - ```python ppo_continuous.py --run_test True```
