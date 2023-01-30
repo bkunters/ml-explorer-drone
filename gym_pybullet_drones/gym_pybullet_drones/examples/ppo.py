@@ -855,7 +855,8 @@ class PPO_PolicyGradient:
         anim.save(video_path, writer='imagemagick', fps=60)
 
     
-    def log_stats(self, p_losses, v_losses, ep_return, ep_lens, total_episodes, ep_time, done_so_far, moving_avg=True, exp_name='exp_name'):
+    def log_stats(self, p_losses, v_losses, ep_return, ep_lens, total_episodes, \
+                  ep_time, done_so_far, moving_avg=False, exp_name='exp_name'):
         """Calculate stats and log to W&B, CSV, logger """
         if torch.is_tensor(ep_return):
             ep_return = ep_return.detach().numpy()
@@ -863,12 +864,13 @@ class PPO_PolicyGradient:
         mean_p_loss = round(np.mean([np.sum(loss) for loss in p_losses]), 6)
         mean_v_loss = round(np.mean([np.sum(loss) for loss in v_losses]), 6)
 
-        # Last 100 values
-        if moving_avg:
-            ep_return = ep_return[-100:]
-
         # Calculate the stats of an episode
         cum_ret = [np.sum(ep_rews) for ep_rews in ep_return]
+
+        # Last 100 values
+        if moving_avg:
+            cum_ret = cum_ret[-100:]
+
         mean_ep_time = round(np.mean(ep_time), 6)
         mean_ep_len = round(np.mean(ep_lens), 6)
 
