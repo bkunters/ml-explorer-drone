@@ -226,6 +226,8 @@ def run(env_id=DEFAULT_ENV,
                             gamma=0.99,
                             adam_eps=1e-7,
                             clip_ratio=0.2,
+                            normalize_adv=normalize_adv,
+                            normalize_ret=normalize_ret,
                             seed=seed,
                             exp_name=exp_name
                         ) 
@@ -233,7 +235,7 @@ def run(env_id=DEFAULT_ENV,
         agent = trainer.create_ppo()
         agent.learn()
 
-        # get trained policy
+        # get trained policy (actor)
         policy = trainer.get_policy()
         # cleanup
         trainer.shutdown()
@@ -289,6 +291,7 @@ def run(env_id=DEFAULT_ENV,
     
     else:
         AssertionError("No algorithm selected.")
+
     ############################################################
     #### Show (and record a video of) the model's performance ##
     ############################################################
@@ -417,7 +420,8 @@ def arg_parser():
     parser.add_argument('--obs',                default=DEFAULT_OBS,                type=ObservationType,                                   help='Observation space (default: kin)', metavar='')
     parser.add_argument('--act',                default=DEFAULT_ACT,                type=ActionType,                                        help='Action space (default: one_d_rpm)', metavar='')
     parser.add_argument('--cpu',                default=DEFAULT_CPU,                type=int,                                               help='Number of training environments (default: 1)', metavar='')        
-    parser.add_argument('--train_steps',        default=DEFAULT_TRAINING_STEPS,     type=int,                                               help='Select the amount of training steps')
+    parser.add_argument('--train_steps',        default=DEFAULT_TRAINING_STEPS,     type=int,                                               help='Select the amount of training steps.')
+    parser.add_argument('--seed',               default=DEFAULT_SEED,               type=int,                                               help='Select seed for reproducability.')
     parser.add_argument('--colab',              default=DEFAULT_COLAB,              type=bool,                                              help='Whether example is being run by a notebook (default: "False")', metavar='')
 
     # Parse arguments if they are given
