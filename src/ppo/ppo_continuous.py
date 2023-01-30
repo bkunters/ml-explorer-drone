@@ -63,40 +63,29 @@ DEFAULT_PROJECT_NAME = 'EXP_OpenAIGym_PPO'
 DEFAULT_EXP_NAME = 'exp: (GAE)'
 
 # Hyperparameter
-# time steps regarding trajectories collected and train agent
-DEFAULT_TRAINING_STEPS = 1_000_000
-# max number of episode samples to be sampled per time step.
-DEFAULT_MAX_TRAJECTORY_SIZE = 1024
-# number of experiences to collect per environment
-DEFAULT_ROLLOUT_STEPS = 2048
-# Number of epochs per time step to optimize the neural networks
-DEFAULT_UPDATE_EPOCHS = 64
-DEFAULT_LR_P = 1e-4                        # learning rate for policy network
-DEFAULT_LR_V = 1e-3                       # learning rate for value network
-# factor for trade-off of bias vs variance for GAE
-DEFAULT_GAE_LAMBDA = 0.92
-DEFAULT_GAMMA = 0.95                      # gamma discount factor
-# default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
-DEFAULT_ADAM_EPSILON = 1e-7
-# clipping factor, default value in PPO baseline implementation is 0.2
-DEFAULT_CLIP_RANGE = 0.2
-# name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
-DEFAULT_ENV_ID = 'Pendulum-v1'
-DEFAULT_ENV_NUMBER = 1                    # number of actors
-# wether to normalize the advantage estimate
-DEFAULT_NORM_ADV = False
-DEFAULT_NORM_RET = True                   # wether to normalize the return function
-# wether to take gae, ac, TDac or reinforcement advantage estimate
-DEFAULT_ADV_FUNC = 'gae'
-# wether to use masking based on done flags in gae, TDac
-DEFAULT_USE_MASK = False
+DEFAULT_TRAINING_STEPS = 1_000_000      # time steps regarding trajectories collected and train agent
+DEFAULT_MAX_TRAJECTORY_SIZE = 1024      # max number of episode samples to be sampled per time step.
+DEFAULT_ROLLOUT_STEPS = 2048            # number of experiences to collect per environment
+DEFAULT_UPDATE_EPOCHS = 64              # Number of epochs per time step to optimize the neural networks
+DEFAULT_LR_P = 1e-4                     # learning rate for policy network
+DEFAULT_LR_V = 1e-3                     # learning rate for value network
+DEFAULT_GAE_LAMBDA = 0.92               # factor for trade-off of bias vs variance for GAE
+DEFAULT_GAMMA = 0.95                    # gamma discount factor
+DEFAULT_ADAM_EPSILON = 1e-7             # default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
+DEFAULT_CLIP_RANGE = 0.2                # clipping factor, default value in PPO baseline implementation is 0.2
+DEFAULT_ENV_ID = 'Pendulum-v1'          # name of OpenAI gym environment other: 'Pendulum-v1' , 'MountainCarContinuous-v0'
+DEFAULT_ENV_NUMBER = 1                  # number of actors
+DEFAULT_NORM_ADV = False                # wether to normalize the advantage estimate
+DEFAULT_NORM_RET = True                 # wether to normalize the return function
+DEFAULT_ADV_FUNC = 'gae'                # wether to take gae, ac, TDac or reinforcement advantage estimate
+DEFAULT_USE_MASK = False                # wether to use masking based on done flags in gae, TDac
 
 # setup for torch save models and rendering
 DEFAULT_VIDEO = False
 DEFAULT_LOG_VIDEO_STEPS = 10
 DEFAULT_RENDER_STEPS = 10
 DEFAULT_SAVE_MODEL_STEPS = 100
-DEFAULT_SEED = 42
+DEFAULT_SEED = 42                       
 DEFAULT_TORCH_DETERMINISTIC = True
 DEFAULT_CUDA = True
 
