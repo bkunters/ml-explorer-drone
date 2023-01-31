@@ -53,30 +53,27 @@ from gym_pybullet_drones.utils.utils import sync, str2bool
 # import own modules
 from gym_pybullet_drones.examples import ppo as ppo_v2
 
+
 #######################################
 #######################################
 
 EPISODE_REWARD_THRESHOLD = -0 # Upperbound: rewards are always negative, but non-zero
-
 DEFAULT_VISION = False
 DEFAULT_ENV = 'takeoff' #"takeoff", "hover", 'flythrugate'
 DEFAULT_OBS = ObservationType('kin')
 DEFAULT_ACT = ActionType('pid') # ActionType('one_d_rpm') - 'rpm'for each rotor being independently learned
 DEFAULT_RLLIB = True
-# PPO v2 specific
-DEFAULT_ALGO = 'ppo_v2'
-DEFAULT_NORM_ADV = False                  # wether to normalize the advantage estimate
-DEFAULT_NORM_RET = True                   # wether to normalize the return function
-DEFAULT_ADV_FUNC = 'gae'                  # wether to take gae, ac, td_ac or reinforce for usage of advantage estimate
-# drones
+# drones definition
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
+
 # simulation of env
 DEFAULT_AGGREGATE = True
 DEFAULT_AGGREGATE_STEPS = 5
 DEFAULT_SIMULATION_FREQ_HZ = 60
 DEFAULT_CONTROL_FREQ_HZ = 48
+
 # gui and logging
 DEFAULT_GUI = True
 DEFAULT_USER_DEBUG_GUI = False
@@ -84,14 +81,29 @@ DEFAULT_RECORD_VIDEO = True
 DEFAULT_PLOT = True
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
-DEFAULT_SEED = 42
-DEFAULT_TRAINING_STEPS = 100_000 # just for testing, too short otherwise
 # system defaults
 DEFAULT_CPU = 1
+
+# PPO v2 specific hyperparameter
+DEFAULT_TRAINING_STEPS = 100_000        # just for testing, otherwise too short
+DEFAULT_ROLLOUT_STEPS = 2048            # number of experiences to collect per environment, typically 2048 or 4096
+DEFAULT_UPDATE_EPOCHS = 32              # Number of epochs per time step to optimize the neural networks
+DEFAULT_LR_P = 1e-4                     # learning rate for policy network
+DEFAULT_LR_V = 1e-3                     # learning rate for value network
+DEFAULT_GAE_LAMBDA = 0.95               # factor for tradeoff between bias vs variance in advantage function
+DEFAULT_GAMMA = 0.99                    # gamma discount factor, default in PPO baseline is 0.99
+DEFAULT_ADAM_EPSILON = 1e-7             # epsilon, default in the PPO baseline implementation is 1e-5, the pytorch default is 1e-8 - Andrychowicz, et al. (2021)  uses 0.9
+DEFAULT_CLIP_RANGE = 0.2                # clipping factor, default value in PPO baseline implementation is 0.2
+DEFAULT_ALGO = 'ppo_v2'
+DEFAULT_NORM_ADV = False                # wether to normalize the advantage estimate
+DEFAULT_NORM_RET = True                 # wether to normalize the return function
+DEFAULT_ADV_FUNC = 'gae'                # wether to take gae, ac, td_ac or reinforce for usage of advantage estimate
+DEFAULT_SEED = 42
 
 # get current date and time
 CURR_DATE = datetime.today().strftime('%Y-%m-%d')
 CURR_TIME = datetime.now().strftime("%Y%m%d-%H%M%S")
+
 
 #######################################
 #######################################
@@ -102,10 +114,16 @@ def run(env_id=DEFAULT_ENV,
         algo=DEFAULT_ALGO,
         obs=DEFAULT_OBS,
         act=DEFAULT_ACT,
-        advantage=DEFAULT_ADV_FUNC,
+        train_steps=DEFAULT_TRAINING_STEPS,
+        n_optepochs=DEFAULT_UPDATE_EPOCHS,
+        n_rollout_steps=DEFAULT_ROLLOUT_STEPS,
+        gae_lamdba=DEFAULT_GAE_LAMBDA,
+        gamma=DEFAULT_GAMMA,
+        adam_eps=DEFAULT_ADAM_EPSILON,
+        clip_ratio=DEFAULT_CLIP_RANGE,
         normalize_adv=DEFAULT_NORM_ADV,
         normalize_ret=DEFAULT_NORM_RET,
-        train_steps=DEFAULT_TRAINING_STEPS,
+        advantage=DEFAULT_ADV_FUNC,
         drone=DEFAULT_DRONES,
         num_drones=DEFAULT_NUM_DRONES,
         physics=DEFAULT_PHYSICS,
@@ -125,7 +143,7 @@ def run(env_id=DEFAULT_ENV,
     #### Seed everything for reproducibility ####################
     #############################################################
     
-    seed = check_seed(seed) # place random if none
+    seed = check_seed(seed) # replace with random seeding
     random.seed(seed)
     np.random.seed(seed)
 
@@ -221,12 +239,12 @@ def run(env_id=DEFAULT_ENV,
         trainer = ppo_v2.PPOTrainer(
                             env, 
                             total_training_steps=train_steps, # shorter just for testing
-                            n_optepochs=21,
-                            n_rollout_steps=2048,
-                            gae_lambda=0.95,
-                            gamma=0.99,
-                            adam_eps=1e-7,
-                            clip_ratio=0.2,
+                            n_optepochs=n_optepochs,
+                            n_rollout_steps=n_rollout_steps,
+                            gae_lambda=gae_lamdba,
+                            gamma=gamma,
+                            adam_eps=adam_eps,
+                            clip_ratio=clip_ratio,
                             normalize_adv=normalize_adv,
                             normalize_ret=normalize_ret,
                             seed=seed,
