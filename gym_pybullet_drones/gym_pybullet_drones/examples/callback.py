@@ -23,13 +23,14 @@ class TrainingCallback(BaseCallback):
             "z_velocity": []
         }
         self.wandb = wandb
+        self.iteration_steps = 0
 
     def _on_step(self) -> bool:
         """ This method will be called by the model after each call to `env.step()`.
             :return: (bool) If the callback returns False, training is aborted early.
         """
 
-        if(self.locals.get('n_steps')!= self.n_rollout_steps-1):
+        if(self.iteration_steps!= self.n_rollout_steps-1):
             
             if(self.locals.get('dones')):
                 info = self.locals.get('infos')
@@ -74,6 +75,7 @@ class TrainingCallback(BaseCallback):
                             }, step=self.steps)
                     self.n_ep_rewards = []
                     self.over_flag = False
+                    self.iteration_steps = 0
                     if self.stats_drone_data:
                         # remove old values
                         for value in self.stats_drone_data.values():
@@ -122,6 +124,7 @@ class TrainingCallback(BaseCallback):
                     }, step=self.steps)
             
             self.n_ep_rewards = []
+            self.iteration_steps = 0
             if self.stats_drone_data:
                 # remove old values
                 for value in self.stats_drone_data.values():
@@ -131,4 +134,5 @@ class TrainingCallback(BaseCallback):
             self.over_flag = True
 
         self.steps += 1
+        self.iteration_steps += 1
         return True
